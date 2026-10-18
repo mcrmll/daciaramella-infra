@@ -1,0 +1,6 @@
+# Nesta fase, o Ansible liga-se sempre pela rede da loja. O Tailscale fica para depois (D13).
+loja:
+  hosts:
+    elitedeskserver:
+      ansible_host: 10.77.0.10
+      ansible_user: mciaramella

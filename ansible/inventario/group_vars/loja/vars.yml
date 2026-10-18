@@ -1,0 +1,15 @@
+# Tag da imagem em produção (D10). Fica vazia até ao P6.
+app_tag: ""
+
+# No Mac: onde o release.sh deixa as imagens e os playbooks deixam os logs (logs/).
+release_dir: ~/daciaramella-releases
+
+# Janela de manutenção desligada no servidor de testes (D15). Liga-se quando o servidor for para a loja.
+janela_ativa: false
+
+# Password do sudo do servidor, guardada no Vault (D16).
+ansible_become_password: "{{ vault_become_password }}"
+
+# No Ubuntu 26.04, o `sudo` é o sudo-rs, e o become do Ansible não reconhece a pergunta da password dele
+# (timeout). O sudo clássico está instalado como `sudo.ws` e lê as mesmas regras (/etc/sudoers).
+ansible_become_exe: sudo.ws
