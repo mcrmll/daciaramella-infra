@@ -67,7 +67,7 @@ O hEX refresh cumpre todos os requisitos da rede com o mesmo RouterOS do L009, p
 
 **Não é preciso comprar**
 
-Switch, ponto de acesso Wi-Fi ou licenças de software. Ubuntu, Docker, Caddy e Squid são livres. Tailscale e GitHub Actions têm planos gratuitos; confirmar os limites atuais no momento de configurar.
+Switch, ponto de acesso Wi-Fi ou licenças de software. Ubuntu, Docker, Caddy e Squid são livres. O Tailscale tem plano gratuito; confirmar os limites atuais no momento de configurar.
 
 ## Rede
 
@@ -128,10 +128,9 @@ O servidor é o HP EliteDesk com Ubuntu Server e Docker, e só pode sair para os
 | `<conta>.eu.r2.cloudflarestorage.com` | 443 | Backup | Decidido |
 | `archive.ubuntu.com` e `security.ubuntu.com` | 80 | apt | Proposto |
 | `pkgs.tailscale.com` | 443 | apt | Proposto |
-| `ghcr.io` e `pkg-containers.githubusercontent.com` | 443 | Descarga de imagens | Proposto |
 | Tailscale (coordenação, relays e ligações diretas) | TCP 443 e UDP | tailscaled | Proposto |
 
-O DNS e o NTP passam pelo router próprio, que é quem fala com o exterior. O endpoint da R2 leva o `.eu.`.
+O DNS e o NTP passam pelo router próprio, que é quem fala com o exterior. O endpoint da R2 leva o `.eu.`. Não há registo de imagens na lista: as imagens chegam já construídas do Mac mini (ver CI e deploy).
 
 **Como se aplica** (proposto)
 
@@ -158,18 +157,18 @@ O Tailscale no servidor é o único canal de manutenção, e a aplicação é se
 **Tailscale**
 
 - Instalado só no servidor. Decidido.
-- Operado a partir do Mac mini, na Suíça. Decidido.
+- Operado a partir do Mac mini, na Suíça, só para manutenção (SSH e deploy). A app não se acede pelo Tailscale. Decidido.
 - Ligação direta: o tailscaled pode sair em UDP para qualquer IP, mais TCP 443. Proposto. A [documentação da Tailscale](https://tailscale.com/docs/reference/faq/firewall-ports) avisa que enumerar os relays permitidos acaba por partir a conectividade.
 - ACL de folha: o servidor tem uma tag própria, só o dono lhe chega por SSH, e o servidor não inicia ligações para nada do tailnet. Proposto. Protege as máquinas de casa se o servidor da loja for comprometido.
 
 **HTTPS e nome interno**
 
 - HTTPS com nome de DNS interno. Decidido. Nada configurado ainda.
-- Nome: um subdomínio do domínio próprio, por exemplo `app.loja.daciaramella.com`, definido só como registo estático no router. Proposto.
+- Nome: `app.figaro.local`, definido só como registo estático no router, que responde sem internet. Só a rede da loja acede à app; os Macs não. Não há DNS público. Decidido a 18 out 2026 ([fase 1, P3](infra/planning/fase_1/planos/P3-nome-local.md)).
 - Certificado: Caddy à frente da aplicação, com a sua CA interna, sem depender da internet. Proposto.
 - O certificado raiz do Caddy instala-se uma vez no Windows do balcão e da cozinha.
 - A pasta de dados do Caddy é um volume persistente e entra no backup. Se se perder, o Caddy gera outra raiz e é preciso reinstalá-la nos dois PCs.
-- `MOLONI_ORIGEM_GESTAO` passa a ser o nome HTTPS. O callback da Moloni em modo real depende deste nome, por isso fica decidido antes de o registar.
+- `MOLONI_ORIGEM_GESTAO` passa a ser o nome HTTPS. É a verificação de origem dos pedidos da Gestão à Moloni. A Moloni entra por senha (`grant_type: password`), por isso não há callback a registar.
 
 ## Aplicação e deploy
 
@@ -188,20 +187,31 @@ A aplicação corre em Docker Compose com três serviços, e o deploy é feito s
 
 1. Tirar a publicação da porta `5432` do Postgres. Hoje fica acessível a toda a rede, com a password por omissão.
 2. Trocar as passwords com valor por omissão (`${VAR:-valor}`) por `${VAR:?}`, que falha se o `.env` faltar.
-3. Trocar `build: .` por `image:` com a tag do GHCR, para o servidor não precisar de npm nem do Docker Hub.
+3. Trocar `build: .` por `image:` com a tag do commit (`${APP_TAG:?}`). A imagem chega já construída do Mac, e o compose de produção nunca descarrega imagens (`pull_policy: never`).
 4. Deixar de publicar a porta `3000`. Só o Caddy expõe a 443.
 5. Acrescentar um healthcheck à aplicação, necessário para o rollback automático.
 6. Tirar a chave privada `age` do servidor. O backup só precisa da chave pública; a privada copia-se apenas para restaurar.
 7. Limitar o tamanho dos logs do Docker no `daemon.json`.
-8. Copiar a imagem do Postgres para o GHCR, fixada por digest.
+8. Fixar a imagem do Postgres por digest. O Mac descarrega-a e envia-a ao servidor pelo mesmo caminho das outras.
 
 **CI e deploy**
 
 - Repositório privado no GitHub, sem nada no Actions. Facto atual.
 - Deploy só pelo dono, do Mac mini, pelo Tailscale, direto para a loja, sem staging. Decidido.
-- GitHub Actions só para CI: correr os testes, construir as imagens em x86 e publicá-las no GHCR com a tag do commit. Proposto. O Mac mini é ARM e o servidor é x86.
+- **Imagens construídas no Mac mini**, sem registo de imagens nem GitHub Actions. Todo o contacto com a internet durante o build é do Mac. **Decidido a 18 out 2026.** Um script de release:
+  - recusa avançar com alterações por commitar;
+  - corre os testes com um Postgres temporário;
+  - constrói `app` e `backup` com `docker buildx --platform linux/amd64` e a tag do commit;
+  - guarda-as em ficheiro (`docker save`).
+
+  O Mac mini é ARM e o servidor é x86, por isso o build é emulado e mais lento.
+- **O servidor só corre a app.** Recebe por SSH as imagens já construídas e a configuração, e nunca o código. Não sai para a internet para receber um deploy, nem guarda nenhum token de registo. A app deixa de correr nos Macs. **Decidido a 18 out 2026.**
 - O GitHub não guarda nenhuma credencial com acesso à loja. Proposto.
-- Playbook de deploy em Ansible: backup, descarga da tag pelo proxy, arranque, verificação de saúde e regresso à tag anterior se falhar. Proposto.
+- A tag em produção fica versionada no repositório da infra (`app_tag` no inventário). Fazer deploy é mudar essa linha, commitar e correr o playbook.
+- Playbook de deploy em Ansible. Antes de cada deploy, faz uma cópia da base de dados no próprio Postgres. Se o deploy falhar, repõe sozinho a cópia, a imagem anterior e a configuração anterior (`compose.yml`, `.env` e `Caddyfile`). **Decidido a 18 out 2026.**
+- O rollback com reposição de dados só se faz na noite do deploy. Depois de a loja abrir, corrige-se para a frente, com duas alavancas: trocar só a imagem e pausar a faturação. Os deploys fazem-se à segunda, e há uma lista de verificação depois de cada um. **Decidido a 18 out 2026.**
+- A regra das migrações (acrescentar sim; renomear ou apagar só numa versão seguinte) é uma boa prática, sem teste automático. **Decidido a 18 out 2026.**
+- Plano detalhado em [infra/planning/fase_1](infra/planning/fase_1/ESTADO.md).
 - Playbook de base separado (utilizadores, SSH, firewall, proxy, Docker, Tailscale), corrido raramente. Proposto.
 - Deploys e reinícios só nas janelas de manutenção, fora das 04:30 do backup.
 
@@ -237,8 +247,8 @@ Oito fases, de 0 a 7, pela ordem em que se desbloqueiam. As fases 1 a 5 fazem-se
 
 - [ ] Escrever o compose de produção com as oito alterações
 - [ ] Pôr o Caddy à frente da aplicação, com a CA interna e o nome escolhido
-- [ ] Criar o workflow de CI no Actions: testes, imagens x86, publicação no GHCR
-- [ ] Copiar a imagem do Postgres para o GHCR
+- [ ] Escrever o script de release no Mac: testes com Postgres temporário, imagens x86 com a tag do commit, ficheiro para enviar
+- [ ] Fixar a imagem do Postgres por digest e enviá-la pelo mesmo caminho
 - [ ] Escrever o playbook de deploy com backup, verificação de saúde e rollback
 - [ ] Validar que a aplicação e o backup saem pelo proxy
 - [ ] Fazer um restauro completo a partir da R2
@@ -265,7 +275,6 @@ Oito fases, de 0 a 7, pela ordem em que se desbloqueiam. As fases 1 a 5 fazem-se
 - [ ] Ligar o router próprio ao router da MEO e confirmar que as sub-redes não colidem
 - [ ] Mudar as passwords de gestão e de Wi-Fi do router da MEO
 - [ ] Confirmar o Tailscale a partir de fora da loja
-- [ ] Registar o callback da Moloni em modo real com o nome final
 - [ ] Fazer o primeiro backup e um restauro de teste já na loja
 
 ### Fase 7: operação
@@ -279,7 +288,7 @@ Oito fases, de 0 a 7, pela ordem em que se desbloqueiam. As fases 1 a 5 fazem-se
 Nove pontos ainda por decidir ou confirmar. Os três primeiros condicionam compras ou a fase 1.
 
 - [x] Disco do servidor cifrado ou não? Se sim, tem de desbloquear sozinho pelo TPM, porque ninguém estará lá para escrever uma password. **Decidido a 16 out 2026: sem cifra, por agora**, porque desbloquear à distância seria demasiado difícil. A proteção faz-se por outros meios (ver Sistema).
-- [ ] Nome DNS interno final e sub-rede da loja. **Sub-rede decidida a 16 out 2026: 10.77.0.0/24.** Falta o nome DNS.
+- [x] Nome DNS interno final e sub-rede da loja. **Sub-rede decidida a 16 out 2026: 10.77.0.0/24. Nome decidido a 18 out 2026: `app.figaro.local`.**
 - [ ] Onde fica fisicamente a impressora, e é o servidor que lhe envia os talões?
 - [ ] Que cliente HTTP usa a aplicação para chamar a Moloni (fetch nativo, axios, outro)? Decide como se configura o proxy.
 - [ ] As migrações da base de dados correm sozinhas no arranque da aplicação? Como se desfaz uma migração num rollback?
