@@ -1,0 +1,167 @@
+# Base mínima do servidor (P2, versão 1).
+#
+# Correr sempre primeiro com --check --diff, a partir da pasta ansible/:
+#   ansible-playbook playbooks/base.yml --check --diff
+#
+# As tarefas "já feito à mão" descrevem o que foi feito a 10 e 16/10 e têm de dar "ok", nunca "changed".
+# Se uma delas mostrar uma diferença, parar: o modelo está errado, não o servidor.
+
+- name: Base do servidor
+  hosts: loja
+  become: true
+
+  tasks:
+    # --- Já feito à mão ---
+
+    - name: SSH só por chave
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/10-hardening.conf
+        content: |
+          PasswordAuthentication no
+          PermitRootLogin no
+          KbdInteractiveAuthentication no
+        owner: root
+        group: root
+        mode: "0644"
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Recarregar o SSH
+
+    - name: cloud-init desligado
+      ansible.builtin.copy:
+        dest: /etc/cloud/cloud-init.disabled
+        content: |
+          Disabled by Ubuntu live installer after first boot.
+          To re-enable cloud-init on this image run:
+            sudo cloud-init clean --machine-id
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: ufw nega tudo o que entra
+      community.general.ufw:
+        default: deny
+        direction: incoming
+
+    - name: ufw deixa sair tudo
+      community.general.ufw:
+        default: allow
+        direction: outgoing
+
+    - name: ufw deixa entrar o SSH a partir da rede da loja
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+        from_ip: 10.77.0.0/24
+        comment: SSH rede loja
+
+    - name: ufw ligado, com registo baixo
+      community.general.ufw:
+        state: enabled
+        logging: low
+
+    # Netplan: nesta versão só se verifica. Um erro no netplan corta o acesso ao servidor.
+    - name: Ler o netplan
+      ansible.builtin.slurp:
+        src: /etc/netplan/01-loja.yaml
+      register: netplan
+
+    - name: Netplan como esperado (DHCP na eno1; o IP fixo vem da reserva no router)
+      ansible.builtin.assert:
+        that:
+          - (netplan.content | b64decode | from_yaml) == netplan_esperado
+        fail_msg: O /etc/netplan/01-loja.yaml não está como esperado. O Ansible não mexe no netplan nesta versão; ver à mão.
+        quiet: true
+      vars:
+        netplan_esperado:
+          network:
+            version: 2
+            ethernets:
+              eno1:
+                match:
+                  macaddress: "10:e7:c6:05:90:2a"
+                set-name: eno1
+                dhcp4: true
+                dhcp6: false
+
+    # --- Novo ---
+
+    # O Ansible usa o sudo clássico no become (ansible_become_exe: sudo.ws), porque com o sudo-rs dá timeout.
+    - name: Sudo clássico instalado
+      ansible.builtin.apt:
+        name: sudo
+        state: present
+
+    - name: Fuso de Lisboa
+      community.general.timezone:
+        name: Europe/Lisbon
+
+    # O daemon.json vai antes do pacote, para o Docker arrancar logo com o limite nos logs.
+    - name: Pasta de configuração do Docker
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Limite nos logs do Docker
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: "{{ docker_daemon | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        docker_daemon:
+          log-driver: json-file
+          log-opts:
+            max-size: 10m
+            max-file: "3"
+      notify: Reiniciar o Docker
+
+    # Sem as recomendações do pacote (pigz, ubuntu-fan…): o servidor só corre imagens, não constrói nada (D2).
+    # O mciaramella não entra no grupo docker: entrar no grupo equivale a ser root sem password.
+    - name: Docker e Compose, dos repositórios do Ubuntu
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-compose-v2
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+      register: docker_pacotes
+
+    # Em --check, se o Docker ainda está por instalar, o serviço não existe e o systemd falha: salta-se.
+    - name: Docker ativo e a arrancar com o servidor
+      ansible.builtin.systemd_service:
+        name: docker
+        state: started
+        enabled: true
+      when: not (ansible_check_mode and docker_pacotes is changed)
+
+    - name: Pastas da app
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      loop:
+        - /opt/daciaramella
+        - /opt/daciaramella/anterior
+        - /opt/daciaramella/caddy
+        - /opt/daciaramella/releases
+
+  handlers:
+    - name: Recarregar o SSH
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded
+
+    - name: Reiniciar o Docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+      when: not (ansible_check_mode and docker_pacotes is changed)

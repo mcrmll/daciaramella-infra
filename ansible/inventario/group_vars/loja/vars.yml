@@ -1,8 +1,11 @@
 # Tag da imagem em produção (D10). Fica vazia até ao P6.
 app_tag: ""
 
-# No Mac: onde o release.sh deixa as imagens e os playbooks deixam os logs (logs/).
+# No Mac: onde o construir.sh deixa as imagens e os playbooks deixam os logs (logs/).
 release_dir: ~/daciaramella-releases
+
+# Nome da app na rede da loja (D11), resolvido pelo router (P3). Usado no Caddyfile e no MOLONI_ORIGEM_GESTAO (P5).
+app_nome: app.figaro.local
 
 # Janela de manutenção desligada no servidor de testes (D15). Liga-se quando o servidor for para a loja.
 janela_ativa: false
