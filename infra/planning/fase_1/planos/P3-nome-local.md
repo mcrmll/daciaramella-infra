@@ -1,6 +1,6 @@
 # P3 — Nome na rede da loja
 
-Estado: em curso (passos 1 e 2 feitos a 23/10) · Depende de: P2 · Bloqueia: P6 · Executa: dono e agente (cada passo diz quem) · Máquinas: router
+Estado: feito a 23/10 (o teste no browser faz parte do P6) · Depende de: P2 · Bloqueia: P6 · Executa: dono e agente (cada passo diz quem) · Máquinas: router
 
 ## Objetivo
 
@@ -45,6 +45,5 @@ PC do balcão / cozinha ── "onde fica app.figaro.local?" ──► router he
 - **Passo 1 (dono):** o registo `app.figaro.local → 10.77.0.10` está no router. Do Mac mini, `nslookup app.figaro.local 10.77.0.1` devolve `10.77.0.10`.
 - **Passo 2 (agente):** `app_nome: app.figaro.local` no `vars.yml`.
 - **Router no Git:** `/export` novo, feito a 23/10. O `hex-loja.rsc` tem agora a reserva DHCP do servidor e o registo `app.figaro.local`, as duas únicas mudanças reais. O export sai do router com CRLF e foi convertido para LF.
-- **Faltam duas coisas:**
-  - o teste sem internet, com o cabo da WAN desligado;
-  - o teste no browser, depois do P6.
+- **Sem internet (dono, 23/10):** com o cabo da WAN do router desligado, o nome continua a resolver. OK.
+- O teste no browser fica para a aceitação do [P6](P6-primeira-instalacao.md).

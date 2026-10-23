@@ -8,6 +8,15 @@ app_tag: ""
 postgres_imagem: daciaramella/postgres:17.11-eee6c6e1b089
 caddy_imagem: daciaramella/caddy:2.11.7-eb4d35b7452d
 
+# A app no servidor (compose.yml.j2, P5). O servidor de testes emite na conta de testes da Moloni.
+faturacao_emissao_ativa: 1 # interruptor da emissão: 0 pausa a faturação (P8)
+faturacao_real_ativa: 0 # faturas reais: sempre 0 no servidor de testes
+moloni_http_ativo: 1
+backup_hora: "04:30"
+retencao_local: 30
+# Pasta dos backups na R2 (Q1): teste_loja enquanto o servidor estiver na bancada; loja quando for para a loja.
+rclone_remote: r2:daciaramella-backups/teste_loja
+
 # No Mac: onde o construir.sh deixa as imagens e os playbooks deixam os logs (logs/).
 release_dir: ~/daciaramella-releases
 

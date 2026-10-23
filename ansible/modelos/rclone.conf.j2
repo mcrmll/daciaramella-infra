@@ -1,0 +1,13 @@
+# Destino dos backups na Cloudflare R2, gerado pelo Ansible a partir de ansible/modelos/rclone.conf.j2 e do
+# Vault (P5 da fase 1, Q1). Não editar à mão no servidor. Root, 0600.
+# Igual à secção [r2] do docs/backup-restauro.md da app.
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = {{ vault_r2_access_key_id }}
+secret_access_key = {{ vault_r2_secret_access_key }}
+# Com o .eu.: o bucket é da UE e só responde nesse endereço (sem ele, 403 AccessDenied).
+endpoint = {{ vault_r2_endpoint }}
+acl = private
+# Obrigatório: o token só vê este bucket, e sem esta linha o rclone tenta criá-lo e falha.
+no_check_bucket = true

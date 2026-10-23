@@ -1,0 +1,91 @@
+# Compose de produção da app, gerado pelo Ansible a partir de ansible/modelos/compose.yml.j2 (P5 da fase 1).
+# Não editar à mão no servidor: a próxima corrida do deploy.yml repõe este ficheiro.
+#
+# - Imagens só do Mac: pull_policy: never em todos os serviços (D17).
+# - Só o Caddy publica uma porta (443). O Postgres e a app só se veem na rede interna do compose.
+# - Os segredos vêm do .env, ao lado, e ${VAR:?} faz o compose falhar se faltar algum.
+name: daciaramella
+
+services:
+  postgres:
+    image: {{ postgres_imagem }}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: daciaramella
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: daciaramella
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U daciaramella -d daciaramella"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    image: daciaramella/app:{{ app_tag }}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?falta DATABASE_URL no .env}
+      ADMIN_PASSWORD_INICIAL: ${ADMIN_PASSWORD_INICIAL:?falta ADMIN_PASSWORD_INICIAL no .env}
+      PORT: "3000"
+      NODE_ENV: production
+      TZ: Europe/Lisbon
+      FATURACAO_EMISSAO_ATIVA: "{{ faturacao_emissao_ativa }}"
+      FATURACAO_REAL_ATIVA: "{{ faturacao_real_ativa }}"
+      MOLONI_HTTP_ATIVO: "{{ moloni_http_ativo }}"
+      MOLONI_ORIGEM_GESTAO: https://{{ app_nome }}
+      MOLONI_CLIENT_ID: ${MOLONI_CLIENT_ID:?falta MOLONI_CLIENT_ID no .env}
+      MOLONI_CLIENT_SECRET: ${MOLONI_CLIENT_SECRET:?falta MOLONI_CLIENT_SECRET no .env}
+      MOLONI_CHAVE_CIFRA: ${MOLONI_CHAVE_CIFRA:?falta MOLONI_CHAVE_CIFRA no .env}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+
+  backup:
+    image: daciaramella/backup:{{ app_tag }}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: daciaramella
+      PGPASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD no .env}
+      PGDATABASE: daciaramella
+      TZ: Europe/Lisbon
+      BACKUP_HORA: "{{ backup_hora }}"
+      RETENCAO_LOCAL: "{{ retencao_local }}"
+      AGE_PUBLIC_KEY: ${AGE_PUBLIC_KEY:?falta AGE_PUBLIC_KEY no .env}
+      RCLONE_REMOTE: {{ rclone_remote }}
+    volumes:
+      - backups:/backups
+      - ./rclone:/config/rclone:ro
+
+  caddy:
+    image: {{ caddy_imagem }}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Pasta normal (e não um volume), para o Ansible lá pôr a raiz guardada no Vault (P6).
+      - ./caddy/data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  backups:
+  caddy_config:

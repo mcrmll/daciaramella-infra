@@ -1,6 +1,6 @@
 # P5 — Compose de produção
 
-Estado: por fazer · Depende de: P4 · Bloqueia: P6 · Executa: agente · Máquinas: Mac → servidor
+Estado: feito a 23/10 · Depende de: P4 · Bloqueia: P6 · Executa: agente · Máquinas: Mac → servidor
 
 ## Objetivo
 
@@ -64,9 +64,17 @@ O compose que vai correr no servidor existe como modelo Ansible neste repositór
 10. **Sem o serviço `restauro` nesta fase.** Volta com o `restauro.yml`, numa fase seguinte, e sem montar sempre a pasta da chave.
 11. **Rede: a de omissão, com saída para a internet.** A app precisa dela para a Moloni, e ainda não há proxy. A rede interna sem saída entra com o proxy, na Fase 2 do plano geral.
 
+## Segredos nos modelos
+
+- **O `.env` e o `rclone.conf` levam segredos do Vault.** As tarefas que os escrevem têm `diff: false` e `no_log: true`. Assim, nem o `--diff` nem os erros mostram o conteúdo no ecrã, e o agente, que corre os playbooks, não vê os valores.
+- **No servidor ficam root, 0600**, numa pasta 0750 ou 0700.
+- **Para confirmar que mudaram**, o agente olha só para o `changed` e para o `sha256` do ficheiro, nunca para o conteúdo.
+
 ## Passos
 
-0. **(dono, na Cloudflare e no Terminal)** Criar um token R2 para o servidor, de leitura e escrita, só do bucket `daciaramella-backups`. Juntar os três valores ao Vault com `ansible-vault edit`: `vault_r2_access_key_id`, `vault_r2_secret_access_key` e `vault_r2_account_id`. O token de escrita do Mac mini deixa de ser preciso, porque a simulação parou.
+0. **(dono, no Terminal)** Juntar ao Vault, com `ansible-vault edit`, os três valores da R2: `vault_r2_access_key_id`, `vault_r2_secret_access_key` e `vault_r2_account_id`.
+   - Reaproveita-se o token de leitura e escrita que a simulação usava (decisão do dono, 23/10). A máquina que envia passa a ser o servidor.
+   - Os valores estão na secção `[r2]` do `ops/rclone/rclone.conf` da app, no Mac mini, que fica fora do Git. O *account id* é a parte do `endpoint` antes de `.eu.r2.cloudflarestorage.com`.
 1. **(agente)** Escrever os quatro modelos.
 2. **(agente)** Uma tarefa `validar` no `deploy.yml` (que o P6 escreve), que corre antes de qualquer arranque: preenche os modelos numa pasta temporária no servidor e corre `docker compose config --quiet`.
 3. **(agente, com autorização)** Correr só a validação contra o servidor (`--tags validar`).
@@ -81,3 +89,41 @@ O compose que vai correr no servidor existe como modelo Ansible neste repositór
 ## Riscos
 
 - **Um erro só se vê no arranque,** porque o `docker compose config` valida a forma e não o funcionamento. O P6 é o ensaio a sério, e o servidor de testes pode reinstalar-se do zero (D5).
+
+## Registo
+
+**23/10, passo 0 (dono):** os valores da R2 estão no Vault: `vault_r2_access_key_id`, `vault_r2_secret_access_key`, `vault_r2_account_id` e, por iniciativa do dono, `vault_r2_endpoint`. O `rclone.conf.j2` usa o `vault_r2_endpoint` diretamente, porque é o valor exato que funcionava. O `vault_r2_account_id` fica sem uso.
+
+**23/10, passos 1 e 2 (agente):**
+- **Modelos em `ansible/modelos/`:** `compose.yml.j2`, `env.j2`, `Caddyfile.j2` e `rclone.conf.j2`.
+- **Variáveis novas no `vars.yml`:** `faturacao_emissao_ativa: 1`, `faturacao_real_ativa: 0`, `moloni_http_ativo: 1`, `backup_hora`, `retencao_local` e `rclone_remote: r2:daciaramella-backups/teste_loja`.
+- **Decisões de pormenor:**
+  - **Os segredos só no `.env`; o resto escrito diretamente no compose.** Assim, o `--diff` do compose mostra tudo o que não é segredo.
+  - **O `DATABASE_URL` vem inteiro do `.env`,** com a password codificada (`urlencode` e `replace('/', '%2F')`). Uma password `base64` pode ter `/`, `+` e `=`, e o `urlencode` do Jinja2 deixa o `/` como está. Confirmado que o `pg-connection-string` da app descodifica bem.
+  - **No `.env`, os valores vão entre aspas simples,** para o Compose não fazer substituições com `$`. O `deploy.yml` recusa valores do Vault com `'` ou mudanças de linha.
+  - **O `rclone/` é montado só para leitura** (`:ro`).
+  - **No `Caddyfile`, `skip_install_trust`:** a raiz instala-se nos postos à mão, e não dentro do contentor.
+  - **O `wget` existe na imagem `v0.1.0`** (BusyBox), por isso o *healthcheck* usa-o.
+- **`playbooks/deploy.yml`, só com o bloco `validar`** (`tags: validar`, `check_mode: false`). Faz, por ordem:
+  1. verifica que o `app_tag` não está vazio, que o *endpoint* tem `.eu.`, que a password do admin tem pelo menos 10 caracteres e que os valores cabem entre aspas simples (estes dois últimos com `no_log`);
+  2. preenche os modelos numa pasta temporária do servidor, só de root;
+  3. corre `docker compose config` com um `.env` **de ensaio, com valores falsos**, para os erros se verem sem segredos;
+  4. confirma o projeto `daciaramella`, o `pull_policy: never` em todos os serviços e as portas só no Caddy;
+  5. confirma que, sem a password do Postgres, o compose recusa;
+  6. corre `config --quiet` com o `.env` e o `rclone.conf` verdadeiros, com `no_log`;
+  7. apaga a pasta temporária no `always`.
+- **Validação no Mac, com valores falsos:**
+  - o `--syntax-check` passou;
+  - os modelos preenchem-se bem;
+  - o `docker compose config` mostra 4 serviços, todos `never`, com a 443 só no Caddy;
+  - sem a password, falha com "falta POSTGRES_PASSWORD no .env";
+  - o `caddy validate` com a imagem 2.11.7 dá "Valid configuration".
+
+**23/10, passo 3 (validação no servidor, autorizada pelo dono):**
+- `ansible-playbook playbooks/deploy.yml --tags validar -e app_tag=v0.1.0` deu `ok=15 changed=7 failed=0`. Os `changed` são da pasta temporária.
+- **Aceitação:**
+  - o compose é válido com os valores do Vault;
+  - o `.env` de ensaio sem a password falha com a mensagem do `${VAR:?}`;
+  - há um `pull_policy: never` por serviço e portas só no Caddy, conferidos pelo `assert` sobre o `config --format json`.
+- Depois da corrida, não sobrou nenhuma pasta `/tmp/ansible.*validar`, o `/opt/daciaramella` ficou igual e não há contentores.
+- O que falta provar (`healthy`, portas, nenhuma descarga, HTTPS) é do P6.

@@ -1,0 +1,149 @@
+# Deploy da app no servidor.
+#
+# Nesta versão (P5) só tem a validação dos modelos, que não arranca nada:
+#   ansible-playbook playbooks/deploy.yml --tags validar -e app_tag=v0.1.0
+# O P6 acrescenta a instalação, e o P7 a cópia da base de dados e o rollback.
+#
+# Segredos (P5): as tarefas que escrevem o .env e o rclone.conf têm no_log e diff: false, para o
+# conteúdo nunca aparecer no ecrã, nem com --diff, nem num erro.
+
+- name: Deploy da app
+  hosts: loja
+  become: true
+  gather_facts: false
+
+  tasks:
+    # Corre também com --check: só escreve numa pasta temporária, que apaga no fim.
+    - name: Validar os modelos
+      tags: [validar]
+      check_mode: false
+      block:
+        - name: Há uma versão escolhida (app_tag)
+          ansible.builtin.assert:
+            that: app_tag | length > 0
+            fail_msg: O app_tag está vazio. Pôr a versão no vars.yml ou, para um teste, usar -e app_tag=dev-….
+            quiet: true
+
+        - name: O endpoint da R2 é o da UE
+          ansible.builtin.assert:
+            that: "'.eu.r2.cloudflarestorage.com' in vault_r2_endpoint"
+            fail_msg: O vault_r2_endpoint tem de ter o .eu. (o bucket é da UE; sem ele, a R2 responde 403).
+            quiet: true
+
+        - name: A password inicial do admin tem pelo menos 10 caracteres
+          ansible.builtin.assert:
+            that: vault_admin_password_inicial | length >= 10
+            fail_msg: O vault_admin_password_inicial tem de ter pelo menos 10 caracteres (a app recusa menos).
+            quiet: true
+          no_log: true
+
+        # O env.j2 põe os valores entre aspas simples.
+        - name: Os valores do Vault cabem entre aspas simples no .env
+          ansible.builtin.assert:
+            that:
+              - item is string
+              - >-
+                "'" not in item
+              - >-
+                "\n" not in item
+            quiet: true
+          loop:
+            - "{{ vault_postgres_password }}"
+            - "{{ vault_admin_password_inicial }}"
+            - "{{ vault_moloni_client_id }}"
+            - "{{ vault_moloni_client_secret }}"
+            - "{{ vault_moloni_chave_cifra }}"
+            - "{{ vault_age_public_key }}"
+          no_log: true
+
+        - name: Pasta temporária no servidor (só root)
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: -validar
+          register: validar_dir
+
+        - name: compose.yml e Caddyfile
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../modelos/{{ item }}.j2"
+            dest: "{{ validar_dir.path }}/{{ item }}"
+            mode: "0644"
+          loop: [compose.yml, Caddyfile]
+          diff: false
+
+        # Com valores falsos, os erros do compose podem aparecer no ecrã sem mostrar segredos.
+        - name: .env de ensaio, com valores falsos
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../modelos/env.j2"
+            dest: "{{ validar_dir.path }}/ensaio.env"
+            mode: "0600"
+          vars:
+            vault_postgres_password: falso/com+sinais=
+            vault_admin_password_inicial: falso-admin
+            vault_moloni_client_id: falso
+            vault_moloni_client_secret: falso
+            vault_moloni_chave_cifra: falso
+            vault_age_public_key: age1falso
+          diff: false
+
+        - name: O compose é válido (com o .env de ensaio)
+          ansible.builtin.command:
+            cmd: docker compose --env-file ensaio.env config --format json
+            chdir: "{{ validar_dir.path }}"
+          register: compose_ensaio
+          changed_when: false
+
+        - name: Projeto daciaramella, pull_policy never em todos os serviços, e só o Caddy com portas
+          ansible.builtin.assert:
+            that:
+              - compose.name == 'daciaramella'
+              - compose.services | dict2items | rejectattr('value.pull_policy', 'defined') | list | length == 0
+              - compose.services | dict2items | map(attribute='value.pull_policy') | unique | list == ['never']
+              - compose.services | dict2items | selectattr('value.ports', 'defined') | map(attribute='key') | list == ['caddy']
+            quiet: true
+          vars:
+            compose: "{{ compose_ensaio.stdout | from_json }}"
+
+        - name: Sem a password do Postgres, o compose recusa (${VAR:?})
+          ansible.builtin.shell:
+            cmd: grep -v '^POSTGRES_PASSWORD=' ensaio.env > sem-password.env && docker compose --env-file sem-password.env config --quiet
+            chdir: "{{ validar_dir.path }}"
+          register: compose_sem_password
+          changed_when: false
+          failed_when: compose_sem_password.rc == 0 or 'falta POSTGRES_PASSWORD' not in compose_sem_password.stderr
+
+        - name: .env com os valores do Vault
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../modelos/env.j2"
+            dest: "{{ validar_dir.path }}/.env"
+            mode: "0600"
+          no_log: true
+          diff: false
+
+        - name: Pasta do rclone
+          ansible.builtin.file:
+            path: "{{ validar_dir.path }}/rclone"
+            state: directory
+            mode: "0700"
+
+        - name: rclone.conf com os valores do Vault
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../modelos/rclone.conf.j2"
+            dest: "{{ validar_dir.path }}/rclone/rclone.conf"
+            mode: "0600"
+          no_log: true
+          diff: false
+
+        # Se só esta falhar, o problema está num valor do Vault: o no_log esconde a mensagem.
+        - name: O compose é válido com os valores do Vault
+          ansible.builtin.command:
+            cmd: docker compose config --quiet
+            chdir: "{{ validar_dir.path }}"
+          changed_when: false
+          no_log: true
+
+      always:
+        - name: Apagar a pasta temporária
+          ansible.builtin.file:
+            path: "{{ validar_dir.path }}"
+            state: absent
+          when: validar_dir.path is defined

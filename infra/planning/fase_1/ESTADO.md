@@ -6,7 +6,7 @@ O dono pediu a 18/10 um plano em fases testáveis para instalar a app no servido
 
 Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md). Junta o mínimo da base (Docker, fuso e nome local) ao deploy da Fase 3 do plano geral, para pôr a app a correr cedo. O proxy, a firewall nftables e o restauro a partir da R2 ficam para fases seguintes (ver "Fora desta fase").
 
-**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 em curso: falta o teste sem internet. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`.**
+**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor.**
 
 O P1, em resumo. Os quatro passos foram feitos a 18/10:
 - passo 1: a simulação parou, com `docker compose down` sem `-v`;
@@ -24,7 +24,7 @@ Aceitação, corrida pelo dono a 18/10:
 ## Como retomar
 
 1. Ler este ficheiro, o [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md) e o plano do próximo P.
-2. Próxima ação: o [P5](planos/P5-compose-producao.md). Começa pelo passo 0, do dono: o token R2 do servidor, guardado no Vault. Do [P3](planos/P3-nome-local.md) falta só o teste sem internet.
+2. Próxima ação: o [P6](planos/P6-primeira-instalacao.md), a primeira instalação.
 3. Regras do dono (as mesmas do repositório da app):
    - o commit é sempre do dono: nunca `git add`, `commit` ou `push`. No fim de um P, deixar a árvore pronta e propor a mensagem;
    - nada corre contra o servidor sem autorização do dono nessa sessão. Primeiro `--check --diff`, depois a sério;
@@ -145,9 +145,9 @@ O P4 não depende do servidor. O P5 precisa das tags do P4 e do Docker do P2, pa
 |---|---|---|---|
 | [P1](planos/P1-mac-ansible.md), Mac e Ansible | Parar a simulação, Ansible no Mac mini, inventário, Vault | dono e agente | **feito** (18/10) |
 | [P2](planos/P2-base-servidor.md), base do servidor | `base.yml` v1: Docker, logs, fuso, pastas, e o que já foi feito à mão | agente, com autorização | **feito** (23/10) |
-| [P3](planos/P3-nome-local.md), nome local | `app.figaro.local` no router | dono e agente | em curso (23/10) |
+| [P3](planos/P3-nome-local.md), nome local | `app.figaro.local` no router | dono e agente | **feito** (23/10) |
 | [P4](planos/P4-release-no-mac.md), release no Mac | Node fixo, `testar.sh` com Postgres temporário, `construir.sh --test/--release`, imagens de base, `CLAUDE.md` | agente (app e infra) | **feito** (23/10) |
-| [P5](planos/P5-compose-producao.md), compose de produção | Modelos do compose, `.env` e `Caddyfile`, validados no servidor | agente | por fazer |
+| [P5](planos/P5-compose-producao.md), compose de produção | Modelos do compose, `.env` e `Caddyfile`, validados no servidor | agente | **feito** (23/10) |
 | [P6](planos/P6-primeira-instalacao.md), primeira instalação | `deploy.yml` em modo instalação, HTTPS, raiz do Caddy no Vault | agente e dono | por fazer |
 | [P7](planos/P7-deploy-com-rollback.md), deploy com rollback | Cópia da base de dados, reposição automática, ensaios de falha | agente e dono | por fazer |
 | [P8](planos/P8-alavancas-depois-de-abrir.md), alavancas | Repor a cópia, voltar à imagem anterior, pausar a faturação | agente e dono | por fazer |

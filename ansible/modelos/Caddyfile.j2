@@ -1,0 +1,11 @@
+# Gerado pelo Ansible a partir de ansible/modelos/Caddyfile.j2 (P5 da fase 1). Não editar à mão no servidor.
+{
+	# A raiz da CA interna instala-se nos postos à mão (P6), não dentro do contentor.
+	skip_install_trust
+}
+
+# HTTPS com a CA interna do Caddy: funciona sem internet e sem domínio público (D11).
+{{ app_nome }} {
+	tls internal
+	reverse_proxy app:3000
+}
