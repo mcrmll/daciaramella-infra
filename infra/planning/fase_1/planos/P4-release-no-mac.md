@@ -1,6 +1,6 @@
 # P4 — Release no Mac
 
-Estado: por fazer · Depende de: — · Bloqueia: P5, P6 · Executa: agente (repositórios da app e da infra); o dono autoriza os builds · Máquinas: Mac mini
+Estado: em curso (passos 1 a 5 feitos a 23/10; falta o commit do dono no `dev` e os primeiros builds) · Depende de: — · Bloqueia: P5, P6 · Executa: agente (repositórios da app e da infra); o dono autoriza os builds · Máquinas: Mac mini
 
 ## Objetivo
 
@@ -23,12 +23,12 @@ O `npm test` precisa de um Postgres. Como a app não corre no Mac (D2), o script
 
 ```sh
 docker run -d --rm --name daciaramella-testes-pg \
-  -e POSTGRES_USER=daciaramella -e POSTGRES_PASSWORD=testes -e POSTGRES_DB=daciaramella_test \
+  -e POSTGRES_USER=daciaramella -e POSTGRES_PASSWORD=testes -e POSTGRES_DB=daciaramella \
   -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data \
-  postgres:17.X-alpine
+  postgres:17.11-alpine
 ```
 
-1. Espera pelo `pg_isready`.
+1. Espera pelo `pg_isready` pelo TCP (`-h 127.0.0.1`). Durante o arranque, o servidor temporário do initdb só escuta no socket local. A BD tem de ser a `daciaramella`, porque os testes ligam-se a ela para criarem a `daciaramella_test` (`apps/server/src/testes/bd.ts`).
 2. Corre `DATABASE_URL_TEST=postgres://daciaramella:testes@127.0.0.1:55432/daciaramella_test npm test`. Se receber outro comando, corre esse: por exemplo `ops/testar.sh npm run test:server -- -t '<padrão>'`.
 3. Apaga o contentor no fim, passem ou falhem os testes (`trap … EXIT`).
 
@@ -127,3 +127,45 @@ Os outros documentos da app que assumem a app a correr no Mac ficam para depois 
 - **Os testes correm em arm64 no Mac e a produção em amd64.** Numa app em JavaScript sem dependências nativas, as diferenças são raras. O ensaio a sério é no servidor ([P6](P6-primeira-instalacao.md)).
 - **Um ficheiro de release é grande** (centenas de MB descomprimido). O `zstd` reduz bastante. Os ficheiros antigos no Mac apagam-se à mão.
 - **Quando o servidor for para a loja, um `--test` vai para o servidor da loja.** Decide-se nessa altura onde se testa.
+
+## Registo
+
+**23/10, passos 1, 2 e 5 (agente, no `dev` da app, por commitar pelo dono):**
+- **`Dockerfile`:** `node:26.7.0-alpine` nos dois `FROM`. A tag existe no Docker Hub e é a versão do Node do Mac.
+- **`ops/testar.sh`:**
+  - um Postgres `17.11-alpine` temporário, a mesma versão da simulação;
+  - correção ao plano: `POSTGRES_DB=daciaramella`, e não `daciaramella_test`;
+  - a imagem descarrega-se em silêncio se faltar;
+  - recusa se já houver um contentor de testes;
+  - o `trap` apaga o contentor também com Ctrl+C.
+- **Provas:**
+  - com um comando que falha, sai com erro e não deixa contentor;
+  - um teste filtrado (`comandas.test.ts`, 65 testes) passa;
+  - o `npm test` completo passa em 65 s: servidor 871, web 159 e ferramentas 3;
+  - em todos os casos, não sobrou nenhum contentor.
+- **`CLAUDE.md`:**
+  - a app não corre no Mac;
+  - os testes correm com o `ops/testar.sh`;
+  - saem o `docker compose up`, os `db:migrate` e `db:seed` locais e a secção "Passos para aplicar mudanças (produção)";
+  - entra a secção "Imagens e deploy" (`construir.sh --test` e `--release`);
+  - entra a regra das migrações (D6);
+  - o "Hoje" diz que a simulação parou.
+  - Saíram também o `npm run dev:server` e o `dev:web`, que põem a app a correr no Mac (decisão do dono, 23/10). A nota do interruptor da faturação ficou numa linha à parte.
+
+**23/10, passos 3 e 4 (agente, no repositório da infra):**
+- **`infra/scripts/construir.sh`**, em bash, por causa do `pipefail`:
+  - a cópia limpa faz-se com `git worktree` numa pasta do `$TMPDIR`, apagada pelo `trap`;
+  - os testes correm com `npm ci` e o `ops/testar.sh` da cópia;
+  - as imagens levam as *labels* `revision`, `version` e `created`;
+  - o `docker save` usa `--platform linux/amd64`, porque o Docker do Mac (29.7.2) usa o armazenamento do *containerd*;
+  - o ficheiro escreve-se como `.parcial` e só fica com o nome final no fim.
+  - **Recusas provadas:**
+    - sem argumentos, mostra o uso;
+    - com uma *tag* inexistente (`v9.9.9`), recusa;
+    - com a `v0.0.0` e com o `dev` em `a358cf0`, recusa, porque não têm o `ops/testar.sh`.
+  - Em todos os casos, a pasta da app ficou como estava, sem *worktrees* a mais.
+- **`infra/scripts/imagens-base.sh`:**
+  - o Postgres 17.11 e o Caddy 2.11.7 ficam fixados pelo digest do índice (`imagetools inspect`);
+  - o `base-2026-10-23.tar.zst` (145 MB, `.sha256` OK) demorou 27 s;
+  - dentro do ficheiro, as duas imagens são `linux/amd64` (confirmado no `config` de cada uma);
+  - o `postgres_imagem` e o `caddy_imagem` estão no `vars.yml`, com os digests completos em comentário.

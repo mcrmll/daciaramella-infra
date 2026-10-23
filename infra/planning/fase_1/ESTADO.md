@@ -146,7 +146,7 @@ O P4 não depende do servidor. O P5 precisa das tags do P4 e do Docker do P2, pa
 | [P1](planos/P1-mac-ansible.md), Mac e Ansible | Parar a simulação, Ansible no Mac mini, inventário, Vault | dono e agente | **feito** (18/10) |
 | [P2](planos/P2-base-servidor.md), base do servidor | `base.yml` v1: Docker, logs, fuso, pastas, e o que já foi feito à mão | agente, com autorização | **feito** (23/10) |
 | [P3](planos/P3-nome-local.md), nome local | `app.figaro.local` no router | dono e agente | em curso (23/10) |
-| [P4](planos/P4-release-no-mac.md), release no Mac | Node fixo, `testar.sh` com Postgres temporário, `construir.sh --test/--release`, imagens de base, `CLAUDE.md` | agente (app e infra) | por fazer |
+| [P4](planos/P4-release-no-mac.md), release no Mac | Node fixo, `testar.sh` com Postgres temporário, `construir.sh --test/--release`, imagens de base, `CLAUDE.md` | agente (app e infra) | em curso (23/10) |
 | [P5](planos/P5-compose-producao.md), compose de produção | Modelos do compose, `.env` e `Caddyfile`, validados no servidor | agente | por fazer |
 | [P6](planos/P6-primeira-instalacao.md), primeira instalação | `deploy.yml` em modo instalação, HTTPS, raiz do Caddy no Vault | agente e dono | por fazer |
 | [P7](planos/P7-deploy-com-rollback.md), deploy com rollback | Cópia da base de dados, reposição automática, ensaios de falha | agente e dono | por fazer |
