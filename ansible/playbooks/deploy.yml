@@ -5,11 +5,13 @@
 #   ansible-playbook playbooks/deploy.yml -e app_tag=dev-…     um teste, que não fica no vars.yml
 #   ansible-playbook playbooks/deploy.yml --tags validar       só a validação dos modelos (P5)
 #
-# Três casos:
+# Quatro casos:
 # - instalação: ainda não há /opt/daciaramella/compose.yml. Instala (P6). Não há nada para onde voltar (D5).
 # - troca: outra versão, ou a mesma versão com outra configuração. Faz uma cópia da BD, troca e, se falhar,
 #   volta sozinho à versão anterior, com a BD e a configuração como estavam (P7, D3, D8).
-# - nada a fazer: a mesma versão, com a mesma configuração.
+# - nada a fazer: a mesma versão, com a mesma configuração, e tudo a correr.
+# - reparar: a mesma versão e configuração, mas falta uma imagem ou um serviço está parado. Envia o que faltar
+#   e volta a arrancar, sem cópia da BD (não há migrações novas).
 #
 # Opções (-e): forcar=sim (avança com a versão atual doente), fora_da_janela=sim (com janela_ativa) e
 # agora_ensaio="AAAA-MM-DD HH:MM" (finge outra hora, para ensaiar a janela).
@@ -221,19 +223,52 @@
       register: cfg_rclone
       when: versao_instalada != ''
 
+    # Para distinguir "nada a fazer" de "reparar": a mesma versão, mas com uma imagem em falta ou um serviço parado.
+    - name: As imagens da versão estão todas no servidor?
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'image', 'inspect'] + (envios | map(attribute='imagens') | flatten) }}"
+      register: imagens_presentes
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: versao_instalada != ''
+
+    - name: Os serviços que estão a correr
+      ansible.builtin.command:
+        argv: [docker, compose, ps, --format, json]
+        chdir: "{{ pasta_app }}"
+      register: servicos
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: versao_instalada != ''
+
+    - name: Tudo a correr? (os 4 serviços, e a app healthy)
+      ansible.builtin.set_fact:
+        tudo_a_correr: >-
+          {{ imagens_presentes.rc == 0
+             and (estados | selectattr('State', 'equalto', 'running') | map(attribute='Service') | sort) == ['app', 'backup', 'caddy', 'postgres']
+             and (estados | selectattr('Service', 'equalto', 'app') | map(attribute='Health') | first | default('')) == 'healthy' }}
+      vars:
+        estados: "{{ servicos.stdout_lines | default([]) | map('from_json') | list }}"
+      when: versao_instalada != ''
+
     - name: O caso
       ansible.builtin.set_fact:
         caso: >-
           {{ 'instalação' if versao_instalada == ''
-             else 'nada' if (versao_instalada == app_tag
-                             and not (cfg_publica.changed or cfg_env.changed or cfg_rclone.changed))
-             else 'troca' }}
+             else 'troca' if (versao_instalada != app_tag
+                              or cfg_publica.changed or cfg_env.changed or cfg_rclone.changed)
+             else 'nada' if tudo_a_correr | bool
+             else 'reparar' }}
 
     - name: O que vai acontecer
       ansible.builtin.debug:
         msg: >-
           {{ 'Instalação da ' ~ app_tag if caso == 'instalação'
              else 'Nada a fazer: o servidor já está na ' ~ app_tag ~ ', com a mesma configuração.' if caso == 'nada'
+             else 'Reparar a ' ~ app_tag ~ ': a mesma versão e configuração, mas falta uma imagem ou um serviço está parado.'
+                  ~ ' Envia o que faltar e volta a arrancar, sem cópia da BD.' if caso == 'reparar'
              else 'Troca: ' ~ versao_instalada ~ ' → ' ~ app_tag
                   ~ (' (a mesma versão, com outra configuração)' if versao_instalada == app_tag else '') }}
 
@@ -344,6 +379,21 @@
       ansible.builtin.set_fact:
         app_commit: "{{ (app_etiquetas.stdout | from_json)['org.opencontainers.image.revision'] | default('?') }}"
       when: not ansible_check_mode
+
+    # ━━━ Reparar: a mesma versão, sem cópia da BD (não há migrações novas) ━━━
+    - name: Reparar
+      when: caso == 'reparar'
+      block:
+        - name: Escrever o pacote (fica igual, mas repõe o que faltar, como a raiz do Caddy)
+          ansible.builtin.include_tasks: tarefas/escrever-pacote.yml
+
+        - name: Arrancar e confirmar
+          ansible.builtin.include_tasks: tarefas/arrancar.yml
+          when: not ansible_check_mode
+
+        - name: Registar no deploys.log
+          ansible.builtin.shell:
+            cmd: echo "$(date '+%Y-%m-%d %H:%M %Z') reparação {{ app_tag }} {{ app_commit | default('?') }}" >> {{ pasta_app }}/deploys.log
 
     # ━━━ Instalação (P6) ━━━
     - name: Instalação

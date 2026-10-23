@@ -1,6 +1,6 @@
 # P6 — Primeira instalação no servidor de testes
 
-Estado: em curso (passos 1 a 5 feitos a 23/10; faltam o backup do dia seguinte e os testes da aceitação que param a app) · Depende de: P3, P4, P5 · Bloqueia: P7 · Executa: agente e dono (cada passo diz quem) · Máquinas: Mac mini → servidor
+Estado: feito a 23/10 · Depende de: P3, P4, P5 · Bloqueia: P7 · Executa: agente e dono (cada passo diz quem) · Máquinas: Mac mini → servidor
 
 ## Objetivo
 
@@ -130,3 +130,23 @@ Os PCs da loja não precisam de nada disto: perguntam ao router.
 - **Falta:**
   - o backup de amanhã na R2 (`teste_loja/`);
   - da aceitação, com autorização: o reinício, o "nunca descarrega imagens", a raiz reposta pelo Vault e o recomeçar do zero.
+
+**23/10, os testes da aceitação que param a app (autorizados pelo dono: "go 1 primeiro"):**
+- **Acerto ao `deploy.yml`, um quarto caso: reparar.** Com a mesma versão e a mesma configuração, mas com uma imagem em falta ou um serviço parado (os 4 serviços `running` e a app `healthy`, pelo `docker compose ps --format json`), envia o que faltar, reescreve o pacote (o que repõe a raiz, se faltar) e volta a arrancar, **sem cópia da BD**. Regista "reparação" no `deploys.log`. Sem este caso, o "nada a fazer" do P7 impedia o "volta a enviar a imagem em falta" deste plano. Com tudo normal, continua a dar "Nada a fazer".
+- **a. Reinício** (`ansible loja -b -m reboot`):
+  - voltou em 39 s, e os 4 serviços arrancaram sozinhos (app e Postgres `healthy`);
+  - o HTTPS do Mac mini, sem `-k`, dá "SSL certificate verify ok" e `{"ok":true,"db":true}`. O primeiro pedido, logo a seguir ao arranque, não teve resposta: era o Caddy a preparar o HTTPS.
+- **b. Nunca descarrega imagens:**
+  - com o contentor e a imagem `backup:v0.1.0` apagados, o `docker compose up -d` deu "No such image: daciaramella/backup:v0.1.0" e não a foi buscar;
+  - o `deploy.yml` fez "Reparar": voltou a enviar o `daciaramella-v0.1.0.tar.zst`, carregou-o e arrancou o `backup`, sem tocar na app nem copiar a BD.
+- **c. Raiz reposta pelo Vault:**
+  - com o Caddy parado e o `caddy/data` apagado, o `deploy.yml` fez "Reparar" e escreveu o `root.crt` e o `root.key` (600) do `vault_caddy.yml`;
+  - a impressão digital é a mesma antes, guardada e depois (`BD:4A:A6:8E:…:48:6B`);
+  - o Mac mini continua a abrir o HTTPS sem aviso.
+- **d. Recomeçar do zero:**
+  - `docker compose down -v` (apaga os volumes `pgdata`, `backups` e `caddy_config`) e `rm -rf /opt/daciaramella`;
+  - o `base.yml` recriou as pastas (`changed=1`);
+  - o `deploy.yml` fez a "Instalação da v0.1.0" em 33 s, com as imagens já presentes e a raiz do Vault;
+  - **resultado:** os 4 serviços estão de pé, a raiz é a mesma, o HTTPS do Mac mini funciona sem `-k`, a BD é nova (0 comandas, 14 migrações, só o `admin` criado pela `ADMIN_PASSWORD_INICIAL`) e o `deploys.log` tem uma linha "instalação";
+  - **apagou os dados de teste:** a conta `loja`, a impressora, a ligação à Moloni, o token da cozinha e as comandas. O dono volta a configurá-los. Os backups na R2 (`teste_loja/`) ficam.
+- **O backup na R2 (passo 6) está provado sem esperar pelas 04:30:** os backups dos deploys do P7 subiram com `upload: ok`.
