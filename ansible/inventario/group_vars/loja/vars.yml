@@ -1,8 +1,10 @@
-# Tag da imagem em produção (D10). Fica vazia até ao P6.
-app_tag: ""
+# Versão da app no servidor (D10): a tag do Git, construída com construir.sh --release <tag>.
+# Fazer deploy é mudar esta linha, correr o deploy.yml e commitar só se correu bem.
+app_tag: v0.1.0
 
 # Imagens de terceiros, fixadas pelo digest e trazidas do Mac pelo infra/scripts/imagens-base.sh (P4, D17).
-# Para atualizar: mudar as versões no script, corrê-lo e copiar para aqui as duas linhas que ele mostra.
+# Para atualizar: mudar as versões no script, corrê-lo e copiar para aqui as três linhas que ele mostra.
+imagens_base_ficheiro: base-2026-10-23.tar.zst
 #   postgres:17.11-alpine  sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
 #   caddy:2.11.7-alpine    sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
 postgres_imagem: daciaramella/postgres:17.11-eee6c6e1b089
@@ -18,7 +20,7 @@ retencao_local: 30
 rclone_remote: r2:daciaramella-backups/teste_loja
 
 # No Mac: onde o construir.sh deixa as imagens e os playbooks deixam os logs (logs/).
-release_dir: ~/daciaramella-releases
+release_dir: "{{ lookup('env', 'HOME') }}/daciaramella-releases"
 
 # Nome da app na rede da loja (D11), resolvido pelo router (P3). Usado no Caddyfile e no MOLONI_ORIGEM_GESTAO (P5).
 app_nome: app.figaro.local

@@ -1,6 +1,6 @@
 # P6 — Primeira instalação no servidor de testes
 
-Estado: por fazer · Depende de: P3, P4, P5 · Bloqueia: P7 · Executa: agente e dono (cada passo diz quem) · Máquinas: Mac mini → servidor
+Estado: em curso (passos 1 e 2 feitos a 23/10 pelo agente, a pedido do dono; faltam os passos do dono: 3, 4, 5 e o backup do dia seguinte) · Depende de: P3, P4, P5 · Bloqueia: P7 · Executa: agente e dono (cada passo diz quem) · Máquinas: Mac mini → servidor
 
 ## Objetivo
 
@@ -42,8 +42,13 @@ A app a correr no servidor por HTTPS, com o nome do [P3](P3-nome-local.md), inst
 
 O Caddy gera a raiz no primeiro arranque. Para não ser preciso reinstalá-la nos postos depois de uma reinstalação, guarda-se no Vault:
 
-1. Com `ssh` e `sudo cat`, ler o `root.crt` e o `root.key` diretamente para o `ansible-vault encrypt_string --stdin-name vault_caddy_root_crt` (e `…_key`). Juntar o resultado ao `vault.yml` com `ansible-vault edit`.
-2. Instalar o `root.crt` no Porta-chaves do Mac mini (Sistema) e marcá-lo como "Confiar sempre" para SSL. Na bancada, o Mac mini faz de PC do balcão (Q4 do [ESTADO](../ESTADO.md)). Os PCs Windows da loja ficam para outra fase.
+1. Correr `infra/scripts/guardar-raiz-caddy.sh`. Mudança aprovada pelo dono a 23/10, em vez do `ssh` + `sudo cat` + `encrypt_string`: o `sudo` por SSH precisa de um terminal, que estraga os fins de linha, e colar a chave no vi é fácil de estragar. O script:
+   - traz o `root.crt` e o `root.key` com o Ansible (`fetch`) para uma pasta temporária;
+   - confirma que a chave corresponde ao certificado;
+   - escreve-os cifrados em `group_vars/loja/vault_caddy.yml` (`vault_caddy_root_crt` e `vault_caddy_root_key`);
+   - apaga a pasta temporária;
+   - deixa o certificado público em `~/daciaramella-releases/caddy-raiz.crt`.
+2. Instalar o `caddy-raiz.crt` no Porta-chaves do Mac mini (Sistema) e marcá-lo como "Confiar sempre" para SSL. Na bancada, o Mac mini faz de PC do balcão (Q4 do [ESTADO](../ESTADO.md)). Os PCs Windows da loja ficam para outra fase.
 
 ### Passo 4 — o Mac mini a fazer de PC do balcão (dono)
 
@@ -90,3 +95,35 @@ Os PCs da loja não precisam de nada disto: perguntam ao router.
 - **A conta de testes da Moloni ainda tem tokens da simulação do Mac mini.** Entrar outra vez no servidor (passo 5.5) cria tokens novos, e os antigos deixam de interessar.
 - **Esquecer a linha do `/etc/hosts` no Mac mini** depois da bancada. Não estraga nada na loja, mas o Mac mini continuaria a apontar o nome para o servidor. O passo 4.3 trata disso.
 - **No macOS, um nome `.local` no `/etc/hosts` às vezes demora uns segundos a resolver na primeira vez.** Não afeta o teste.
+
+## Registo
+
+**23/10, passos 1 e 2 (agente, a pedido do dono: "consegues fazer tudo e explicar-me?").** Os passos com segredos, com `sudo` no Mac ou com as credenciais do dono (3, 4 e 5) ficam com o dono.
+- **`playbooks/deploy.yml`, modo de instalação,** mais o `playbooks/tarefas/enviar-imagens.yml`, incluído uma vez por ficheiro de imagens (`include_tasks` com `loop`).
+  - **Instalar ou reaplicar:** lê o `compose.yml` instalado (`slurp`). Sem ele, instala; com a mesma versão, volta a aplicar. Com outra versão, para: isso é o P7.
+  - **Imagens:** confere o ficheiro no Mac e o `sha256`. Só envia se faltar alguma imagem no servidor (`docker image inspect`), carrega com `zstd -dc | docker load` e apaga o ficheiro no `always`. Confirma que a *label* `version` da imagem é o `app_tag`.
+  - **Configuração:** `compose.yml`, `Caddyfile`, `.env` (0600) e `rclone/rclone.conf` (0600). Os segredos levam `no_log` e `diff: false`.
+  - **Raiz do Caddy:** se o Vault a tiver (`vault_caddy.yml`) e o servidor não, repõe-na antes de arrancar.
+  - **Arranque:** `community.docker.docker_compose_v2` com `pull: never` e `wait: true`, até 180 s. Depois, `curl` ao `/health` pelo Caddy, com `--resolve` e a raiz como `--cacert`, com `until`/`retries`.
+  - **`deploys.log`:** data, `instalação` ou `mesma versão`, a tag e o commit.
+- **`vars.yml`:**
+  - `app_tag: v0.1.0`;
+  - `imagens_base_ficheiro: base-2026-10-23.tar.zst`, que o `imagens-base.sh` também passa a mostrar;
+  - `release_dir` com o `HOME` por extenso, porque o `~` não é expandido em todo o lado.
+- **Corrigido no bloco `validar`:** a verificação de mudanças de linha usava `"\n"`, e esta versão do Ansible não interpreta as barras invertidas nas *strings* do Jinja2, por isso não apanhava nada. Passou a `item.splitlines() | join('') == item`, testada com 4 casos. Pela mesma razão, a versão instalada lê-se com `regex_findall` e uma classe de caracteres sem `\`.
+- **`--check --diff`:** `failed=0`, e nenhuma linha com segredos no registo.
+- **A sério:** `ok=44 changed=19 failed=0`, em 61 s. Nenhuma linha com segredos no registo.
+- **Aceitação (a parte do agente):**
+  - a `app` e o `postgres` estão `healthy`, e o `backup` e o `caddy` estão `Up`;
+  - o `/opt/daciaramella/` tem `.env` (600), `Caddyfile`, `compose.yml`, `deploys.log`, `anterior/`, `caddy/`, `rclone/` (700, com `rclone.conf` 600) e `releases/` vazia;
+  - zero ficheiros `.ts` da app no servidor;
+  - do Mac, a 5432 e a 3000 estão fechadas e a 443 está aberta;
+  - `https://app.figaro.local/health` pela rede da loja responde `{"ok":true,"db":true}`;
+  - o Caddy criou a raiz, em `caddy/data/caddy/pki/authorities/local/`.
+- **Reaplicar a mesma versão** (idempotência): `changed=8`, todos da pasta temporária da validação e do `deploys.log`. As imagens foram saltadas, a configuração ficou `ok`, e os contentores não foram recriados (`Up 3 minutes`).
+- **Falta:**
+  - passo 3 (dono): `guardar-raiz-caddy.sh` e confiar na raiz no Mac mini;
+  - passo 4 (dono): o `/etc/hosts`;
+  - passo 5 (dono): a primeira verificação no browser;
+  - o backup de amanhã na R2 (`teste_loja/`);
+  - da aceitação, com autorização: o reinício, o "nunca descarrega imagens", a raiz reposta pelo Vault e o recomeçar do zero.

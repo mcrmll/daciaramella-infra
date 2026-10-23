@@ -1,18 +1,33 @@
 # Deploy da app no servidor.
 #
-# Nesta versão (P5) só tem a validação dos modelos, que não arranca nada:
-#   ansible-playbook playbooks/deploy.yml --tags validar -e app_tag=v0.1.0
-# O P6 acrescenta a instalação, e o P7 a cópia da base de dados e o rollback.
+#   ansible-playbook playbooks/deploy.yml --check --diff     o que faria, sem mudar nada
+#   ansible-playbook playbooks/deploy.yml                    a sério
+#   ansible-playbook playbooks/deploy.yml --tags validar     só a validação dos modelos (P5)
 #
-# Segredos (P5): as tarefas que escrevem o .env e o rclone.conf têm no_log e diff: false, para o
-# conteúdo nunca aparecer no ecrã, nem com --diff, nem num erro.
+# Nesta versão (P6) sabe instalar a versão do app_tag e voltar a aplicar a mesma versão. Mudar de versão
+# numa instalação que já existe é um deploy com cópia da BD e rollback: o P7 acrescenta-o.
+#
+# Segredos (P5): as tarefas que escrevem o .env, o rclone.conf e a chave da raiz do Caddy têm no_log e
+# diff: false, para o conteúdo nunca aparecer no ecrã, nem com --diff, nem num erro.
 
 - name: Deploy da app
   hosts: loja
   become: true
   gather_facts: false
 
+  vars:
+    pasta_app: /opt/daciaramella
+    pasta_raiz_caddy: "{{ pasta_app }}/caddy/data/caddy/pki/authorities/local"
+    envios:
+      - nome: app
+        ficheiro: "daciaramella-{{ app_tag }}.tar.zst"
+        imagens: ["daciaramella/app:{{ app_tag }}", "daciaramella/backup:{{ app_tag }}"]
+      - nome: base
+        ficheiro: "{{ imagens_base_ficheiro }}"
+        imagens: ["{{ postgres_imagem }}", "{{ caddy_imagem }}"]
+
   tasks:
+    # ━━━ Validar (P5) ━━━
     # Corre também com --check: só escreve numa pasta temporária, que apaga no fim.
     - name: Validar os modelos
       tags: [validar]
@@ -44,8 +59,7 @@
               - item is string
               - >-
                 "'" not in item
-              - >-
-                "\n" not in item
+              - item.splitlines() | join('') == item
             quiet: true
           loop:
             - "{{ vault_postgres_password }}"
@@ -147,3 +161,183 @@
             path: "{{ validar_dir.path }}"
             state: absent
           when: validar_dir.path is defined
+
+    # ━━━ Que instalação é esta? ━━━
+    - name: Ler o compose.yml instalado (se houver)
+      ansible.builtin.slurp:
+        src: "{{ pasta_app }}/compose.yml"
+      register: compose_instalado
+      failed_when: false
+
+    - name: Versão instalada
+      ansible.builtin.set_fact:
+        versao_instalada: >-
+          {{ (compose_instalado.content | b64decode
+              | regex_findall('image: daciaramella/app:([A-Za-z0-9_.-]+)') | first | default(''))
+             if compose_instalado.content is defined else '' }}
+
+    - name: Instalar, ou voltar a aplicar a mesma versão (mudar de versão é o P7)
+      ansible.builtin.assert:
+        that: versao_instalada in ['', app_tag]
+        fail_msg: >-
+          Está instalada a {{ versao_instalada }} e o app_tag é {{ app_tag }}. Este deploy.yml ainda só sabe
+          instalar: mudar de versão com cópia da BD e rollback é o P7.
+        quiet: true
+
+    # ━━━ Imagens: do Mac para o servidor ━━━
+    - name: Enviar e carregar as imagens que faltam
+      ansible.builtin.include_tasks: tarefas/enviar-imagens.yml
+      loop: "{{ envios }}"
+      loop_control:
+        loop_var: envio
+        label: "{{ envio.nome }}"
+
+    - name: Etiquetas da imagem da app
+      ansible.builtin.command:
+        argv:
+          - docker
+          - image
+          - inspect
+          - daciaramella/app:{{ app_tag }}
+          - --format
+          - "{% raw %}{{ json .Config.Labels }}{% endraw %}"
+      register: app_etiquetas
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: A imagem é a versão pedida
+      ansible.builtin.assert:
+        that: (app_etiquetas.stdout | from_json)['org.opencontainers.image.version'] == app_tag
+        fail_msg: A imagem daciaramella/app:{{ app_tag }} diz ser outra versão.
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Commit da imagem (para o deploys.log)
+      ansible.builtin.set_fact:
+        app_commit: "{{ (app_etiquetas.stdout | from_json)['org.opencontainers.image.revision'] | default('?') }}"
+      when: not ansible_check_mode
+
+    # ━━━ Configuração em /opt/daciaramella ━━━
+    - name: Pastas do Caddy e do rclone
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ pasta_app }}/caddy/data", mode: "0750" }
+        - { path: "{{ pasta_app }}/rclone", mode: "0700" }
+
+    - name: compose.yml e Caddyfile
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../modelos/{{ item }}.j2"
+        dest: "{{ pasta_app }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [compose.yml, Caddyfile]
+
+    - name: .env (segredos do Vault)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../modelos/env.j2"
+        dest: "{{ pasta_app }}/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
+
+    - name: rclone.conf (segredos do Vault)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../modelos/rclone.conf.j2"
+        dest: "{{ pasta_app }}/rclone/rclone.conf"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
+
+    # ━━━ Raiz do Caddy ━━━
+    # Na primeira instalação é o Caddy que a cria; o dono guarda-a no Vault (guardar-raiz-caddy.sh).
+    # Numa reinstalação, repõe-se a do Vault antes de o Caddy arrancar, e os postos continuam a confiar nela.
+    - name: A raiz do Caddy já está no servidor?
+      ansible.builtin.stat:
+        path: "{{ pasta_raiz_caddy }}/root.crt"
+      register: raiz_no_servidor
+
+    - name: Repor a raiz do Caddy guardada no Vault
+      when: vault_caddy_root_crt is defined and not raiz_no_servidor.stat.exists
+      block:
+        - name: Pasta da raiz
+          ansible.builtin.file:
+            path: "{{ pasta_raiz_caddy }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: root.crt
+          ansible.builtin.copy:
+            content: "{{ vault_caddy_root_crt }}"
+            dest: "{{ pasta_raiz_caddy }}/root.crt"
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: root.key
+          ansible.builtin.copy:
+            content: "{{ vault_caddy_root_key }}"
+            dest: "{{ pasta_raiz_caddy }}/root.key"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+          diff: false
+
+    # ━━━ Arrancar e confirmar ━━━
+    # Em --check não arranca: as imagens não foram carregadas.
+    - name: Arrancar (docker compose up), à espera dos healthchecks
+      community.docker.docker_compose_v2:
+        project_src: "{{ pasta_app }}"
+        state: present
+        pull: never
+        wait: true
+        wait_timeout: 180
+      register: compose_up
+      when: not ansible_check_mode
+
+    - name: A app responde por HTTPS, pelo Caddy
+      ansible.builtin.command:
+        argv:
+          - curl
+          - -fsS
+          - --resolve
+          - "{{ app_nome }}:443:127.0.0.1"
+          - --cacert
+          - "{{ pasta_raiz_caddy }}/root.crt"
+          - https://{{ app_nome }}/health
+      register: saude
+      until: saude.rc == 0
+      retries: 12
+      delay: 5
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: O /health diz que a app e a BD estão bem
+      ansible.builtin.assert:
+        that:
+          - (saude.stdout | from_json).ok
+          - (saude.stdout | from_json).db
+        fail_msg: "O /health respondeu {{ saude.stdout }}"
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Registar no deploys.log
+      ansible.builtin.shell:
+        cmd: >-
+          echo "$(date '+%Y-%m-%d %H:%M %Z')
+          {{ 'instalação' if versao_instalada == '' else 'mesma versão' }}
+          {{ app_tag }} {{ app_commit | default('?') }}"
+          >> {{ pasta_app }}/deploys.log
+      when: not ansible_check_mode

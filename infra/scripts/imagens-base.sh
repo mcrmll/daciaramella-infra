@@ -42,5 +42,6 @@ mv "$FICHEIRO.parcial" "$FICHEIRO"
 echo
 echo "Pronto: $FICHEIRO ($(du -h "$FICHEIRO" | cut -f1 | tr -d ' '))"
 echo "Para o vars.yml:"
+echo "  imagens_base_ficheiro: $(basename "$FICHEIRO")"
 echo "  postgres_imagem: $POSTGRES"
 echo "  caddy_imagem: $CADDY"
