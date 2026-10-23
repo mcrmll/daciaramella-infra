@@ -6,7 +6,7 @@ O dono pediu a 18/10 um plano em fases testáveis para instalar a app no servido
 
 Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md). Junta o mínimo da base (Docker, fuso e nome local) ao deploy da Fase 3 do plano geral, para pôr a app a correr cedo. O proxy, a firewall nftables e o restauro a partir da R2 ficam para fases seguintes (ver "Fora desta fase").
 
-**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor. P6 em curso: a v0.1.0 está instalada e responde por HTTPS (23/10); faltam os passos do dono.**
+**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor. P6 em curso: a v0.1.0 está instalada e verificada pelo dono no Mac mini (23/10); faltam o backup do dia seguinte na R2 e os testes que param a app.**
 
 O P1, em resumo. Os quatro passos foram feitos a 18/10:
 - passo 1: a simulação parou, com `docker compose down` sem `-v`;

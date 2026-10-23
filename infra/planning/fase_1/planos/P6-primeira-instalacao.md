@@ -1,6 +1,6 @@
 # P6 — Primeira instalação no servidor de testes
 
-Estado: em curso (passos 1 e 2 feitos a 23/10 pelo agente, a pedido do dono; faltam os passos do dono: 3, 4, 5 e o backup do dia seguinte) · Depende de: P3, P4, P5 · Bloqueia: P7 · Executa: agente e dono (cada passo diz quem) · Máquinas: Mac mini → servidor
+Estado: em curso (passos 1 a 5 feitos a 23/10; faltam o backup do dia seguinte e os testes da aceitação que param a app) · Depende de: P3, P4, P5 · Bloqueia: P7 · Executa: agente e dono (cada passo diz quem) · Máquinas: Mac mini → servidor
 
 ## Objetivo
 
@@ -121,9 +121,12 @@ Os PCs da loja não precisam de nada disto: perguntam ao router.
   - `https://app.figaro.local/health` pela rede da loja responde `{"ok":true,"db":true}`;
   - o Caddy criou a raiz, em `caddy/data/caddy/pki/authorities/local/`.
 - **Reaplicar a mesma versão** (idempotência): `changed=8`, todos da pasta temporária da validação e do `deploys.log`. As imagens foram saltadas, a configuração ficou `ok`, e os contentores não foram recriados (`Up 3 minutes`).
+- **Isolamento (D11), visto por acaso a 23/10:** o dono tentou abrir a app no MacBook Pro ligado à rede do router de casa, do lado da WAN do MikroTik. A ligação à 443 do servidor nunca chegou, e o servidor nunca viu o MacBook Pro na sua tabela de vizinhos. Da rede de fora do MikroTik não se chega à app, como pede o D11. O dono deixou o teste no MacBook Pro.
+**23/10, passos 3 a 5 (dono): "all good".**
+- **Passo 3:** o `guardar-raiz-caddy.sh` escreveu o `vault_caddy.yml`, cifrado e commitado. A raiz é "Caddy Local Authority - 2026 ECC Root", válida até 31/08/2036, e o Mac mini confia nela.
+- **Passo 4:** a linha `10.77.0.10  app.figaro.local` está no `/etc/hosts` do Mac mini, para apagar no fim da bancada.
+- **Passo 5:** HTTPS sem aviso, login do admin, a conta `loja`, a impressora, a Moloni, a cozinha e uma comanda de teste.
+
 - **Falta:**
-  - passo 3 (dono): `guardar-raiz-caddy.sh` e confiar na raiz no Mac mini;
-  - passo 4 (dono): o `/etc/hosts`;
-  - passo 5 (dono): a primeira verificação no browser;
   - o backup de amanhã na R2 (`teste_loja/`);
   - da aceitação, com autorização: o reinício, o "nunca descarrega imagens", a raiz reposta pelo Vault e o recomeçar do zero.
