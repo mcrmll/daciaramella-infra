@@ -1,6 +1,6 @@
 # P4 — Release no Mac
 
-Estado: em curso (passos 1 a 5 feitos a 23/10; falta o commit do dono no `dev` e os primeiros builds) · Depende de: — · Bloqueia: P5, P6 · Executa: agente (repositórios da app e da infra); o dono autoriza os builds · Máquinas: Mac mini
+Estado: feito a 23/10 · Depende de: — · Bloqueia: P5, P6 · Executa: agente (repositórios da app e da infra); o dono autoriza os builds · Máquinas: Mac mini
 
 ## Objetivo
 
@@ -169,3 +169,27 @@ Os outros documentos da app que assumem a app a correr no Mac ficam para depois 
   - o `base-2026-10-23.tar.zst` (145 MB, `.sha256` OK) demorou 27 s;
   - dentro do ficheiro, as duas imagens são `linux/amd64` (confirmado no `config` de cada uma);
   - o `postgres_imagem` e o `caddy_imagem` estão no `vars.yml`, com os digests completos em comentário.
+
+**23/10, passo 6.1 (primeiro `--test`, autorizado pelo dono):**
+- O dono commitou `0a0fc7c` no `dev`.
+- **`construir.sh --test` → `daciaramella-dev-2026-10-23-1436.tar.zst` (109 MB), em 1 min 39 s no total, com os testes.** O risco do build lento (mais de 15 min) não se confirmou.
+- **Aceitação:**
+  - o `sha256` está OK;
+  - a `app` e a `backup` são `linux/amd64`, com `revision` = `0a0fc7c8ee73…` e `version` = a etiqueta;
+  - `NODE_VERSION=26.7.0`;
+  - não há código-fonte: zero ficheiros em `apps/server/src` e `apps/web/src`, zero `.ts` fora do `node_modules`. Estão lá o `dist` do servidor (57 ficheiros), as migrações (31) e o `dist` da web (17);
+  - a `app` tem 327 MB e a `backup` 38 MB;
+  - a pasta da app ficou igual, sem *worktrees* a mais.
+- **Teste partido:** num clone descartável com um commit no `dev` com um teste que falha de propósito (`APP_DIR` apontado para o clone), o script saiu com 1, sem ficheiro e sem imagens, e apagou a cópia. O clone foi apagado.
+- **Ficheiros por commitar não entram:** isto vale por construção, porque a cópia sai do commit (`git worktree add <commit>`) e nunca da pasta de trabalho.
+- O primeiro `--release` está no passo 6.2, abaixo.
+
+**23/10, passo 6.2 (primeiro `--release`, autorizado pelo dono):**
+- O dono fez o *pull request* #100 (`dev` → `main`, *merge* `eeaf02e`) e a Release `v0.1.0` no GitHub. A `v0.0.0` (`a358cf0`) fica como estava: é anterior ao P4 e o script recusa-a.
+- **`construir.sh --release v0.1.0` → `daciaramella-v0.1.0.tar.zst` (109 MB), em 1 min 8 s, com os testes** (871, 159 e 3).
+- **Aceitação:**
+  - o `sha256` está OK;
+  - a `app` e a `backup` são `linux/amd64`, com `revision` = `eeaf02e27ce0…` e `version` = `v0.1.0`;
+  - `NODE_VERSION=26.7.0`;
+  - não há código-fonte.
+- O `app_tag` no `vars.yml` continua vazio até ao P6 (D10).
