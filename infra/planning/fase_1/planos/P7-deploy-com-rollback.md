@@ -14,7 +14,7 @@ O deploy de uma versão nova, quando falha, volta sozinho à versão anterior, c
   - o ficheiro da release está em `release_dir`, o `sha256` bate certo e a etiqueta `revision` corresponde ao `app_tag`;
   - ou a imagem já está no servidor. É o caso de voltar a uma das 3 últimas versões ([P8](P8-alavancas-depois-de-abrir.md)).
 
-  Se não existir de nenhuma forma, para e diz para correr primeiro o `release.sh`.
+  Se não existir de nenhuma forma, para e diz para correr primeiro o `construir.sh`.
 - **Se o servidor já estiver nessa tag, com a mesma configuração,** não faz nada e diz porquê.
 - **Janela, só com `janela_ativa: true` (D15):**
   - hora de Lisboa, lida no servidor: das 01:00 às 06:00 todos os dias, e segunda e terça o dia todo;
@@ -89,13 +89,13 @@ A cópia `rollback_<tag_atual>` fica até ao deploy seguinte. É ela que o [P8](
 ## Passos
 
 1. **(agente) Completar o `deploy.yml`.** O modo de instalação do P6 continua a funcionar quando não existe `compose.yml`.
-2. **(agente, repositório da app) Ramos descartáveis para os ensaios,** que nunca se juntam à `main` e se apagam no fim. Cada um precisa de um commit, para o `release.sh` ter uma tag, e esses commits são feitos ou autorizados pelo dono:
+2. **(agente, repositório da app) Ramos descartáveis para os ensaios,** que nunca se juntam à `main` e se apagam no fim. Cada um precisa de um commit, para o `construir.sh` ter o que construir, e esses commits são feitos ou autorizados pelo dono:
    - `ensaio/boa`: só muda um texto;
    - `ensaio/arranque-falha`: um `throw` na primeira linha do `index.ts`, antes das migrações;
    - `ensaio/migracao-e-falha`: uma migração que cria a tabela `ensaio_rollback`, e um `throw` logo a seguir a `aplicarMigrations()`;
    - `ensaio/aditiva`: uma migração que só acrescenta uma coluna com `DEFAULT` (é para o P8).
 
-   A release de cada um faz-se com o `release.sh`, no ramo. Os `throw` não partem o `npm test`, porque os testes não importam o `index.ts`.
+   A imagem de cada um faz-se com o `construir.sh --test`, que só lê o `dev`: rever no P7 como pôr o commit de ensaio no `dev` sem o deixar lá. Os `throw` não partem o `npm test`, porque os testes não importam o `index.ts`.
 3. **(o dono autoriza) Ensaios no servidor de testes.**
 4. **(agente) Limpar no fim:**
    - apagar as bases `falhado_*` dos ensaios;

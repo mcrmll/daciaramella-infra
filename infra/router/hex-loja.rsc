@@ -2,12 +2,14 @@
 #
 # Ficheiro vivo: substituir pelo resultado de um novo `/export` sempre que a
 # configuração mudar. O histórico fica no git. O `/export` não inclui passwords.
+# O export sai do router com fins de linha CRLF: converter para LF antes de guardar.
 #
-# Estado a 16 out 2026: rede da loja 10.77.0.0/24, ainda com a firewall de
+# Estado a 23 out 2026: rede da loja 10.77.0.0/24, ainda com a firewall de
 # origem (defconf). As regras por porta do plano (Fase 4) ainda não existem.
+# Reserva DHCP do servidor 10.77.0.10 e registo DNS app.figaro.local (fase 1, P3).
 # Fora do DHCP: impressora vretti M817 com IP fixo 10.77.0.30, na ether5.
 
-# 2026-10-16 13:10:12 by RouterOS 7.23.8
+# 2026-10-23 09:45:18 by RouterOS 7.23.8
 # software id = NG7L-AB1P
 #
 # model = E50UG
@@ -34,32 +36,49 @@ set discover-interface-list=LAN
 add comment=defconf interface=bridge list=LAN
 add comment=defconf interface=ether1 list=WAN
 /ip address
-add address=10.77.0.1/24 comment="LAN loja" interface=bridge network=10.77.0.0
+add address=10.77.0.1/24 comment="LAN loja" interface=bridge network=\
+    10.77.0.0
 /ip dhcp-client
 add comment=defconf interface=ether1 name=client1
+/ip dhcp-server lease
+add address=10.77.0.10 comment=servidor mac-address=10:E7:C6:05:90:2A server=\
+    defconf
 /ip dhcp-server network
-add address=10.77.0.0/24 comment="LAN loja" dns-server=10.77.0.1 gateway=10.77.0.1 ntp-server=10.77.0.1
+add address=10.77.0.0/24 comment="LAN loja" dns-server=10.77.0.1 gateway=\
+    10.77.0.1 ntp-server=10.77.0.1
 /ip dns
 set allow-remote-requests=yes
 /ip dns static
 add address=10.77.0.1 comment=defconf name=router.lan type=A
+add address=10.77.0.10 comment=app name=app.figaro.local type=A
 /ip firewall filter
-add action=accept chain=input comment="defconf: accept established,related,untracked" connection-state=\
+add action=accept chain=input comment=\
+    "defconf: accept established,related,untracked" connection-state=\
     established,related,untracked
-add action=drop chain=input comment="defconf: drop invalid" connection-state=invalid
+add action=drop chain=input comment="defconf: drop invalid" connection-state=\
+    invalid
 add action=accept chain=input comment="defconf: accept ICMP" protocol=icmp
-add action=accept chain=input comment="defconf: accept to local loopback (for CAPsMAN)" dst-address=127.0.0.1
-add action=drop chain=input comment="defconf: drop all not coming from LAN" in-interface-list=!LAN
-add action=accept chain=forward comment="defconf: accept in ipsec policy" ipsec-policy=in,ipsec
-add action=accept chain=forward comment="defconf: accept out ipsec policy" ipsec-policy=out,ipsec
-add action=fasttrack-connection chain=forward comment="defconf: fasttrack" connection-state=established,related
-add action=accept chain=forward comment="defconf: accept established,related, untracked" connection-state=\
+add action=accept chain=input comment=\
+    "defconf: accept to local loopback (for CAPsMAN)" dst-address=127.0.0.1
+add action=drop chain=input comment="defconf: drop all not coming from LAN" \
+    in-interface-list=!LAN
+add action=accept chain=forward comment="defconf: accept in ipsec policy" \
+    ipsec-policy=in,ipsec
+add action=accept chain=forward comment="defconf: accept out ipsec policy" \
+    ipsec-policy=out,ipsec
+add action=fasttrack-connection chain=forward comment="defconf: fasttrack" \
+    connection-state=established,related
+add action=accept chain=forward comment=\
+    "defconf: accept established,related, untracked" connection-state=\
     established,related,untracked
-add action=drop chain=forward comment="defconf: drop invalid" connection-state=invalid
-add action=drop chain=forward comment="defconf: drop all from WAN not DSTNATed" connection-nat-state=!dstnat \
+add action=drop chain=forward comment="defconf: drop invalid" \
+    connection-state=invalid
+add action=drop chain=forward comment=\
+    "defconf: drop all from WAN not DSTNATed" connection-nat-state=!dstnat \
     connection-state=new in-interface-list=WAN
 /ip firewall nat
-add action=masquerade chain=srcnat comment="defconf: masquerade" ipsec-policy=out,none out-interface-list=WAN
+add action=masquerade chain=srcnat comment="defconf: masquerade" \
+    ipsec-policy=out,none out-interface-list=WAN
 /ip service
 set ftp disabled=yes
 set telnet disabled=yes
@@ -78,32 +97,56 @@ add address=2001:db8::/32 comment="defconf: documentation" list=bad_ipv6
 add address=2001:10::/28 comment="defconf: ORCHID" list=bad_ipv6
 add address=3ffe::/16 comment="defconf: 6bone" list=bad_ipv6
 /ipv6 firewall filter
-add action=accept chain=input comment="defconf: accept established,related,untracked" connection-state=\
+add action=accept chain=input comment=\
+    "defconf: accept established,related,untracked" connection-state=\
     established,related,untracked
-add action=drop chain=input comment="defconf: drop invalid" connection-state=invalid
-add action=accept chain=input comment="defconf: accept ICMPv6" protocol=icmpv6
-add action=accept chain=input comment="defconf: accept UDP traceroute" dst-port=33434-33534 protocol=udp
-add action=accept chain=input comment="defconf: accept DHCPv6-Client prefix delegation." dst-port=546 protocol=udp \
-    src-address=fe80::/10
-add action=accept chain=input comment="defconf: accept IKE" dst-port=500,4500 protocol=udp
-add action=accept chain=input comment="defconf: accept ipsec AH" protocol=ipsec-ah
-add action=accept chain=input comment="defconf: accept ipsec ESP" protocol=ipsec-esp
-add action=accept chain=input comment="defconf: accept all that matches ipsec policy" ipsec-policy=in,ipsec
-add action=drop chain=input comment="defconf: drop everything else not coming from LAN" in-interface-list=!LAN
-add action=fasttrack-connection chain=forward comment="defconf: fasttrack6" connection-state=established,related
-add action=accept chain=forward comment="defconf: accept established,related,untracked" connection-state=\
+add action=drop chain=input comment="defconf: drop invalid" connection-state=\
+    invalid
+add action=accept chain=input comment="defconf: accept ICMPv6" protocol=\
+    icmpv6
+add action=accept chain=input comment="defconf: accept UDP traceroute" \
+    dst-port=33434-33534 protocol=udp
+add action=accept chain=input comment=\
+    "defconf: accept DHCPv6-Client prefix delegation." dst-port=546 protocol=\
+    udp src-address=fe80::/10
+add action=accept chain=input comment="defconf: accept IKE" dst-port=500,4500 \
+    protocol=udp
+add action=accept chain=input comment="defconf: accept ipsec AH" protocol=\
+    ipsec-ah
+add action=accept chain=input comment="defconf: accept ipsec ESP" protocol=\
+    ipsec-esp
+add action=accept chain=input comment=\
+    "defconf: accept all that matches ipsec policy" ipsec-policy=in,ipsec
+add action=drop chain=input comment=\
+    "defconf: drop everything else not coming from LAN" in-interface-list=\
+    !LAN
+add action=fasttrack-connection chain=forward comment="defconf: fasttrack6" \
+    connection-state=established,related
+add action=accept chain=forward comment=\
+    "defconf: accept established,related,untracked" connection-state=\
     established,related,untracked
-add action=drop chain=forward comment="defconf: drop invalid" connection-state=invalid
-add action=drop chain=forward comment="defconf: drop packets with bad src ipv6" src-address-list=bad_ipv6
-add action=drop chain=forward comment="defconf: drop packets with bad dst ipv6" dst-address-list=bad_ipv6
-add action=drop chain=forward comment="defconf: rfc4890 drop hop-limit=1" hop-limit=equal:1 protocol=icmpv6
-add action=accept chain=forward comment="defconf: accept ICMPv6" protocol=icmpv6
+add action=drop chain=forward comment="defconf: drop invalid" \
+    connection-state=invalid
+add action=drop chain=forward comment=\
+    "defconf: drop packets with bad src ipv6" src-address-list=bad_ipv6
+add action=drop chain=forward comment=\
+    "defconf: drop packets with bad dst ipv6" dst-address-list=bad_ipv6
+add action=drop chain=forward comment="defconf: rfc4890 drop hop-limit=1" \
+    hop-limit=equal:1 protocol=icmpv6
+add action=accept chain=forward comment="defconf: accept ICMPv6" protocol=\
+    icmpv6
 add action=accept chain=forward comment="defconf: accept HIP" protocol=139
-add action=accept chain=forward comment="defconf: accept IKE" dst-port=500,4500 protocol=udp
-add action=accept chain=forward comment="defconf: accept ipsec AH" protocol=ipsec-ah
-add action=accept chain=forward comment="defconf: accept ipsec ESP" protocol=ipsec-esp
-add action=accept chain=forward comment="defconf: accept all that matches ipsec policy" ipsec-policy=in,ipsec
-add action=drop chain=forward comment="defconf: drop everything else not coming from LAN" in-interface-list=!LAN
+add action=accept chain=forward comment="defconf: accept IKE" dst-port=\
+    500,4500 protocol=udp
+add action=accept chain=forward comment="defconf: accept ipsec AH" protocol=\
+    ipsec-ah
+add action=accept chain=forward comment="defconf: accept ipsec ESP" protocol=\
+    ipsec-esp
+add action=accept chain=forward comment=\
+    "defconf: accept all that matches ipsec policy" ipsec-policy=in,ipsec
+add action=drop chain=forward comment=\
+    "defconf: drop everything else not coming from LAN" in-interface-list=\
+    !LAN
 /ipv6 nd
 # automatic dns option advertising is not started, re-apply dns config
 set [ find default=yes ] advertise-dns=yes

@@ -1,6 +1,6 @@
 # P1 — Mac mini pronto para o Ansible
 
-Estado: por fazer · Depende de: — · Bloqueia: P2, P5 a P9 · Executa: dono e agente (cada passo diz quem) · Máquinas: Mac mini
+Estado: feito a 18/10 · Depende de: — · Bloqueia: P2, P5 a P9 · Executa: dono e agente (cada passo diz quem) · Máquinas: Mac mini
 
 ## Objetivo
 
@@ -25,7 +25,7 @@ Estado: por fazer · Depende de: — · Bloqueia: P2, P5 a P9 · Executa: dono e
 ### Passo 3 — estrutura no repositório (agente)
 
 ```text
-infra/ansible/
+ansible/
   ansible.cfg
   vault-pass.sh                         # lê a password do Vault do Porta-chaves (D18)
   inventario/loja.yml
@@ -38,9 +38,13 @@ infra/ansible/
 - **`inventario/loja.yml`:** um grupo `loja` com o host `elitedeskserver`, `ansible_host: 10.77.0.10` e `ansible_user: mciaramella`. Nesta fase, o Ansible liga-se sempre pela rede da loja. O Tailscale fica para depois (D13).
 - **`vars.yml`:**
   - `app_tag: ""`, que fica vazio até ao P6;
-  - `release_dir: ~/daciaramella-releases`, onde o `release.sh` deixa as imagens e os playbooks deixam os logs (`logs/`);
+  - `release_dir: ~/daciaramella-releases`, onde o `construir.sh` deixa as imagens e os playbooks deixam os logs (`logs/`);
   - `janela_ativa: false` (D15);
-  - `ansible_become_password: "{{ vault_become_password }}"` (D16).
+  - `ansible_become_password: "{{ vault_become_password }}"` (D16);
+  - `ansible_become_exe: sudo.ws`, acrescentado a 18/10.
+    - No 26.04, o `sudo` é o `sudo-rs`, e o `become` falhava por timeout à espera da pergunta da password.
+    - O sudo clássico (`sudo.ws`) funciona e lê o mesmo `/etc/sudoers`.
+    - Testado primeiro com `-e ansible_become_exe=sudo.ws`.
 - **`ansible.cfg`:**
   - aponta para o inventário;
   - `vault_password_file = vault-pass.sh`;
@@ -50,7 +54,9 @@ infra/ansible/
 
 ### Passo 4 — Vault e segredos (dono, no Terminal, fora do VS Code)
 
-1. Guardar a password do Vault no Porta-chaves: `security add-generic-password -a daciaramella-infra -s ansible-vault -w`. O comando pede a password, por isso ela não fica no histórico do shell. Da primeira vez que um playbook a ler, o macOS pergunta se o `security` pode aceder: responder "Permitir sempre".
+1. Guardar a password do Vault no Porta-chaves: `security add-generic-password -a daciaramella-infra -s ansible-vault -w`. O comando pede a password, por isso ela não fica no histórico do shell.
+
+   O `security` criou a entrada e fica na lista de acesso, por isso lê a password sem perguntar (D18). Qualquer programa que corra como o dono, incluindo o agente, consegue decifrar o Vault em silêncio. O dono testou a confirmação obrigatória a 18/10 e preferiu não ter uma janela por comando.
 2. Guardar a mesma password no cofre de passwords. É a única cópia fora do Mac mini.
 3. `ansible-vault create inventario/group_vars/loja/vault.yml`, com estas variáveis (os nomes podem ir para o Git; os valores, nunca):
    - `vault_become_password`: a password do `sudo` do `mciaramella` no servidor;
@@ -68,12 +74,13 @@ infra/ansible/
 - `docker ps` no Mac mini não mostra nenhum contentor da app.
 - `ansible loja -m ping` responde `pong`.
 - `ansible loja -b -m command -a whoami` responde `root`. Prova o `sudo` com a password do Vault, sem a escrever.
-- `head -1 infra/ansible/inventario/group_vars/loja/vault.yml` mostra `$ANSIBLE_VAULT;1.1;AES256`.
+- `head -1 ansible/inventario/group_vars/loja/vault.yml` mostra `$ANSIBLE_VAULT;1.1;AES256`.
 - `git status` não mostra nenhum ficheiro decifrado.
 - A password do Vault está no cofre de passwords do dono.
 
 ## Riscos
 
 - **Perder a password do Vault** é perder os segredos da instalação. Os da Moloni recuperam-se no portal da Moloni, mas a `MOLONI_CHAVE_CIFRA` não: sem ela, é preciso entrar outra vez na Moloni. A mitigação é o passo 4.2.
+- **O agente consegue decifrar o Vault sem perguntar** (D18). A proteção é só a regra: o agente nunca mostra valores do Vault e pede autorização antes de correr comandos contra o servidor.
 - **Commitar um ficheiro decifrado por engano.** A mitigação é só usar `ansible-vault edit` e conferir o `head -1` antes de cada commit.
 - **A simulação do Mac mini para, e com ela os envios para a `simulacao/` da R2.** Quem os retoma é a Q1 do [ESTADO](../ESTADO.md).

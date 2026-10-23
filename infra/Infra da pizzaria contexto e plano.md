@@ -164,7 +164,7 @@ O Tailscale no servidor é o único canal de manutenção, e a aplicação é se
 **HTTPS e nome interno**
 
 - HTTPS com nome de DNS interno. Decidido. Nada configurado ainda.
-- Nome: `app.figaro.local`, definido só como registo estático no router, que responde sem internet. Só a rede da loja acede à app; os Macs não. Não há DNS público. Decidido a 18 out 2026 ([fase 1, P3](infra/planning/fase_1/planos/P3-nome-local.md)).
+- Nome: `app.figaro.local`, definido só como registo estático no router, que responde sem internet. Só a rede da loja acede à app; os Macs não. Não há DNS público. Decidido a 18 out 2026 ([fase 1, P3](planning/fase_1/planos/P3-nome-local.md)).
 - Certificado: Caddy à frente da aplicação, com a sua CA interna, sem depender da internet. Proposto.
 - O certificado raiz do Caddy instala-se uma vez no Windows do balcão e da cozinha.
 - A pasta de dados do Caddy é um volume persistente e entra no backup. Se se perder, o Caddy gera outra raiz e é preciso reinstalá-la nos dois PCs.
@@ -211,7 +211,7 @@ A aplicação corre em Docker Compose com três serviços, e o deploy é feito s
 - Playbook de deploy em Ansible. Antes de cada deploy, faz uma cópia da base de dados no próprio Postgres. Se o deploy falhar, repõe sozinho a cópia, a imagem anterior e a configuração anterior (`compose.yml`, `.env` e `Caddyfile`). **Decidido a 18 out 2026.**
 - O rollback com reposição de dados só se faz na noite do deploy. Depois de a loja abrir, corrige-se para a frente, com duas alavancas: trocar só a imagem e pausar a faturação. Os deploys fazem-se à segunda, e há uma lista de verificação depois de cada um. **Decidido a 18 out 2026.**
 - A regra das migrações (acrescentar sim; renomear ou apagar só numa versão seguinte) é uma boa prática, sem teste automático. **Decidido a 18 out 2026.**
-- Plano detalhado em [infra/planning/fase_1](infra/planning/fase_1/ESTADO.md).
+- Plano detalhado em [infra/planning/fase_1](planning/fase_1/ESTADO.md).
 - Playbook de base separado (utilizadores, SSH, firewall, proxy, Docker, Tailscale), corrido raramente. Proposto.
 - Deploys e reinícios só nas janelas de manutenção, fora das 04:30 do backup.
 

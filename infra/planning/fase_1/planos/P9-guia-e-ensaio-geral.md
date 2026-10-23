@@ -15,7 +15,7 @@ O dono faz um deploy completo sozinho, só com o guia. É a prova de que a fase 
    - em produção (`janela_ativa: true`), à segunda de manhã (D7), com a terça de reserva. Nunca entre as 04:15 e as 04:45. Fora da janela, só com um motivo escrito no `deploys.log`.
 2. **No dia a dia:** os testes correm no Mac com `ops/testar.sh`, com um Postgres temporário. A app em si só se testa no servidor (D2).
 3. **Um deploy, por ordem:**
-   1. no repositório da app, `ops/release.sh`, que testa, constrói e deixa o ficheiro em `~/daciaramella-releases/`;
+   1. no repositório da infra, `infra/scripts/construir.sh --release <tag>`, que testa, constrói e deixa o ficheiro em `~/daciaramella-releases/`;
    2. pôr no `vars.yml` o `app_tag` que a release mostrar;
    3. `ansible-playbook playbooks/deploy.yml`;
    4. a lista de verificação;
@@ -31,7 +31,7 @@ O dono faz um deploy completo sozinho, só com o guia. É a prova de que a fase 
 
    | Sintoma | O que fazer |
    |---|---|
-   | O `release.sh` falhou nos testes | Corrigir e voltar a correr. Para repetir só esses testes, usar `ops/testar.sh` com um filtro |
+   | O `construir.sh` falhou nos testes | Corrigir e voltar a correr. Para repetir só esses testes, usar `ops/testar.sh` com um filtro |
    | O deploy falhou e voltou sozinho | Ler o log em `~/daciaramella-releases/logs/`, corrigir e fazer outra release |
    | O deploy falhou e a versão anterior também não arranca | Ver o estado mostrado pelo playbook. Repor a cópia à mão, com os comandos do P7 (9b.3). Se não der, restaurar o backup cifrado da noite |
    | Problema encontrado na mesma noite | `repor-copia.yml` ([P8](P8-alavancas-depois-de-abrir.md)) |
@@ -51,7 +51,7 @@ O dono faz um deploy completo sozinho, só com o guia. É a prova de que a fase 
 ### Passo 3 — fecho (agente)
 
 1. Atualizar o [ESTADO](../ESTADO.md) com o estado de cada P e o resultado do ensaio.
-2. No [plano geral](../../../../Infra%20da%20pizzaria%20contexto%20e%20plano.md), marcar o que ficou feito nas Fases 1 e 3 e escrever que o deploy está descrito nesta fase.
+2. No [plano geral](../../../Infra%20da%20pizzaria%20contexto%20e%20plano.md), marcar o que ficou feito nas Fases 1 e 3 e escrever que o deploy está descrito nesta fase.
 3. Criar um ponto de situação novo em `docs/status/`.
 4. Confirmar no `git status` que não há segredos decifrados.
 5. Propor ao dono a mensagem do commit.

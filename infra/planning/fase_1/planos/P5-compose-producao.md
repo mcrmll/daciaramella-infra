@@ -6,11 +6,12 @@ Estado: por fazer · Depende de: P4 · Bloqueia: P6 · Executa: agente · Máqui
 
 O compose que vai correr no servidor existe como modelo Ansible neste repositório e é válido no servidor. O compose da app continua a ser o de desenvolvimento, que hoje ninguém corre (D2). O arranque a sério prova-se no [P6](P6-primeira-instalacao.md).
 
-## Ficheiros (em `infra/ansible/modelos/`)
+## Ficheiros (em `ansible/modelos/`)
 
 - `compose.yml.j2`
 - `env.j2`, preenchido a partir do Vault
 - `Caddyfile.j2`
+- `rclone.conf.j2`, preenchido a partir do Vault (Q1)
 
 ## Diferenças face ao compose da app
 
@@ -52,14 +53,21 @@ O compose que vai correr no servidor existe como modelo Ansible neste repositór
 
 9. **Backup:**
    - imagem com a tag da release;
-   - `RCLONE_REMOTE` vazio e sem a pasta do rclone montada, até à decisão da Q1 do [ESTADO](../ESTADO.md);
+   - envia para a R2 (Q1 do [ESTADO](../ESTADO.md)), com `RCLONE_REMOTE={{ rclone_remote }}`:
+     - no `vars.yml`, `rclone_remote: r2:daciaramella-backups/teste_loja`, enquanto o servidor estiver na bancada;
+     - passa a `…/loja` quando o servidor for para a loja;
+   - monta `/opt/daciaramella/rclone/` (root, 0700) em `/config/rclone`, como na app;
+   - lá dentro, o `rclone.conf` (0600) sai do `rclone.conf.j2`:
+     - a secção `[r2]` é igual à do `docs/backup-restauro.md` da app, com `no_check_bucket = true` e o `endpoint` com `.eu.`;
+     - os valores vêm do Vault: `vault_r2_access_key_id`, `vault_r2_secret_access_key` e `vault_r2_account_id`;
    - o resto como na app (`BACKUP_HORA`, `RETENCAO_LOCAL` e `AGE_PUBLIC_KEY`).
 10. **Sem o serviço `restauro` nesta fase.** Volta com o `restauro.yml`, numa fase seguinte, e sem montar sempre a pasta da chave.
 11. **Rede: a de omissão, com saída para a internet.** A app precisa dela para a Moloni, e ainda não há proxy. A rede interna sem saída entra com o proxy, na Fase 2 do plano geral.
 
 ## Passos
 
-1. **(agente)** Escrever os três modelos.
+0. **(dono, na Cloudflare e no Terminal)** Criar um token R2 para o servidor, de leitura e escrita, só do bucket `daciaramella-backups`. Juntar os três valores ao Vault com `ansible-vault edit`: `vault_r2_access_key_id`, `vault_r2_secret_access_key` e `vault_r2_account_id`. O token de escrita do Mac mini deixa de ser preciso, porque a simulação parou.
+1. **(agente)** Escrever os quatro modelos.
 2. **(agente)** Uma tarefa `validar` no `deploy.yml` (que o P6 escreve), que corre antes de qualquer arranque: preenche os modelos numa pasta temporária no servidor e corre `docker compose config --quiet`.
 3. **(agente, com autorização)** Correr só a validação contra o servidor (`--tags validar`).
 

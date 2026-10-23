@@ -34,7 +34,7 @@ A app a correr no servidor por HTTPS, com o nome do [P3](P3-nome-local.md), inst
 
 ### Passo 2 — instalar (dono)
 
-1. No Mac, correr o `infra/scripts/imagens-base.sh` e o `ops/release.sh` a partir da `main` ([P4](P4-release-no-mac.md)).
+1. No Mac, correr o `infra/scripts/imagens-base.sh` e o `construir.sh --release <tag>` ([P4](P4-release-no-mac.md)).
 2. Pôr no `vars.yml` o `app_tag` e as tags locais das imagens de base.
 3. Correr `ansible-playbook playbooks/deploy.yml --check --diff`, e depois a sério.
 
@@ -69,7 +69,7 @@ Os PCs da loja não precisam de nada disto: perguntam ao router.
 
 - **A instalação fez-se só com o Ansible.** No servidor, só se fizeram leituras à mão.
 - **O servidor não tem o código:**
-  - `/opt/daciaramella/` só tem `compose.yml`, `.env`, `Caddyfile`, `anterior/`, `caddy/`, `releases/` (vazia) e `deploys.log`;
+  - `/opt/daciaramella/` só tem `compose.yml`, `.env`, `Caddyfile`, `anterior/`, `caddy/`, `rclone/`, `releases/` (vazia) e `deploys.log`;
   - `find / -path /proc -prune -o -name '*.ts' -path '*apps/server/src*' -print` não encontra nada.
 - **HTTPS:** `https://app.figaro.local` abre no Mac mini, a fazer de PC do balcão, sem aviso de certificado.
 - **O registo do router:** `nslookup app.figaro.local 10.77.0.1` devolve `10.77.0.10`.
@@ -78,7 +78,9 @@ Os PCs da loja não precisam de nada disto: perguntam ao router.
 - **Portas, vistas de um Mac na bancada:** a 5432 e a 3000 do `10.77.0.10` estão fechadas e a 443 está aberta.
 - **Nunca descarrega imagens:** depois de `docker image rm daciaramella/backup:<tag>`, o `docker compose up -d` falha com "image not found" e não a vai buscar. Para repor, correr outra vez o `deploy.yml`, que volta a enviar a imagem em falta.
 - **Reinício:** depois de reiniciar o servidor, tudo volta sozinho e o `/health` responde.
-- **Backup:** no dia seguinte, o backup das 04:30 está no volume `daciaramella_backups`, com `"upload":"nao_configurado"` (Q1).
+- **Backup:**
+  - no dia seguinte, o backup das 04:30 está no volume `daciaramella_backups`, com `"upload":"ok"`;
+  - está também na R2, na pasta `teste_loja/` do `daciaramella-backups` (Q1). Vê-se no painel da Cloudflare.
 - **Raiz:** com o Caddy parado e a pasta `caddy/data` apagada, um novo `deploy.yml` repõe a mesma raiz. A impressão digital (`openssl x509 -noout -fingerprint -sha256`) é igual à de antes.
 - **Repetível:** recomeçar do zero no servidor de testes (o dono corre `docker compose down -v` e apaga `/opt/daciaramella`) e voltar a correr o `base.yml` e o `deploy.yml` deixa tudo como estava, com a mesma raiz.
 

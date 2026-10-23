@@ -4,14 +4,27 @@ O dono pediu a 18/10 um plano em fases testáveis para instalar a app no servido
 - a app deixa de correr nos Macs: o Mac constrói e faz o deploy, e o servidor só corre a app;
 - a app só se acede na rede da loja, pelo nome `app.figaro.local`. Os Macs não acedem à app.
 
-Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../../Infra%20da%20pizzaria%20contexto%20e%20plano.md). Junta o mínimo da base (Docker, fuso e nome local) ao deploy da Fase 3 do plano geral, para pôr a app a correr cedo. O proxy, a firewall nftables e o restauro a partir da R2 ficam para fases seguintes (ver "Fora desta fase").
+Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md). Junta o mínimo da base (Docker, fuso e nome local) ao deploy da Fase 3 do plano geral, para pôr a app a correr cedo. O proxy, a firewall nftables e o restauro a partir da R2 ficam para fases seguintes (ver "Fora desta fase").
 
-**Estado: por começar. Nenhum P feito.**
+**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`.**
+
+O P1, em resumo. Os quatro passos foram feitos a 18/10:
+- passo 1: a simulação parou, com `docker compose down` sem `-v`;
+- passo 2: Ansible instalado (`ansible` 14.5.0, `ansible-core` 2.21.5, `community.docker` 5.4.0);
+- passo 3: a estrutura `ansible/`;
+- passo 4: o Vault, cifrado, com as sete variáveis do plano. O `vault_age_public_key` foi o último a entrar: o dono tirou-o do `.env` da app.
+
+Aceitação, corrida pelo dono a 18/10:
+- o `ping` respondeu `pong`, com o Python 3.14 no servidor;
+- o `whoami` com `-b` respondeu `root`, com o `sudo.ws` lido do `vars.yml` (ver "Situação hoje", servidor);
+- não há nenhum contentor da app no Mac, o `vault.yml` está cifrado e não há nenhum ficheiro decifrado no `git status`.
+
+- A password do Vault está no Porta-chaves do Mac mini e no cofre de passwords pessoal do dono (confirmado a 19/10).
 
 ## Como retomar
 
-1. Ler este ficheiro, o [plano geral](../../../Infra%20da%20pizzaria%20contexto%20e%20plano.md) e o plano do próximo P.
-2. Próxima ação: o [P1](planos/P1-mac-ansible.md). O [P4](planos/P4-release-no-mac.md) não depende do servidor e pode avançar em paralelo.
+1. Ler este ficheiro, o [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md) e o plano do próximo P.
+2. Próxima ação: o [P3](planos/P3-nome-local.md) ou o [P5](planos/P5-compose-producao.md), que já podem avançar. O [P4](planos/P4-release-no-mac.md) não depende do servidor e pode avançar em paralelo.
 3. Regras do dono (as mesmas do repositório da app):
    - o commit é sempre do dono: nunca `git add`, `commit` ou `push`. No fim de um P, deixar a árvore pronta e propor a mensagem;
    - nada corre contra o servidor sem autorização do dono nessa sessão. Primeiro `--check --diff`, depois a sério;
@@ -25,20 +38,24 @@ Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../../Infra%
 
    Os passos com segredos são do dono e estão marcados "dono". Fazem-se no Terminal do Mac, fora do VS Code. O dono nunca cola segredos no chat.
 
+   **Atenção: isto é uma regra, não uma barreira técnica.**
+   - O agente corre como o utilizador do dono, e o Porta-chaves entrega a password do Vault sem perguntar (D18). Por isso, qualquer comando do Ansible decifra o Vault em silêncio.
+   - O agente nunca mostra valores do Vault, nem com o `debug`, e pede autorização antes de correr comandos contra o servidor.
+
 ## Situação hoje (18/10)
 
 Verificado a 18/10 só com leituras, sem mudar nada.
 
 - **Mac mini:**
   - Docker com `buildx`, que já constrói para `linux/amd64`;
-  - a simulação da app ainda está a correr. Para no [P1](planos/P1-mac-ansible.md) (D2), e o Docker fica para o build;
+  - a simulação da app parou no [P1](planos/P1-mac-ansible.md) (D2). Os dados ficaram nos volumes, e o Docker fica para o build;
   - `zstd` instalado;
-  - **Ansible não está instalado.**
+  - Ansible instalado no P1 (ver o estado acima).
 - **Servidor** (`elitedeskserver`, `10.77.0.10`):
-  - **sem Docker e sem Tailscale**;
+  - Docker 29.1.3 e Compose 2.40.3, instalados pelo `base.yml` a 23/10 (P2), e ainda sem Tailscale;
   - `zstd` instalado;
-  - fuso ainda em UTC;
-  - o `sudo` pede password;
+  - fuso Europe/Lisbon desde 23/10 (P2);
+  - o `sudo` pede password e é o `sudo-rs` 0.2.13, por omissão (`/usr/bin/sudo` → `/etc/alternatives/sudo` → `/usr/lib/cargo/bin/sudo`). O sudo clássico está em `/usr/bin/sudo.ws`. Com o `sudo-rs`, o `become` do Ansible falha por timeout à espera da pergunta da password, por isso o Ansible usa o `sudo.ws` (`ansible_become_exe`, P1, 18/10);
   - 162 GB livres na raiz.
 - **App** (`daciaramella-system`, `main` em `a10bd1d`):
   - o `Dockerfile` usa `node:26-alpine`, uma tag que avança sozinha. O estágio final só leva o código já compilado (`dist`), as migrações e as dependências de produção, e não leva o código-fonte;
@@ -69,28 +86,42 @@ Não se reabrem sem ele.
 - **D8. Uma versão é a imagem e também a configuração.** O rollback repõe juntos a imagem, o `compose.yml`, o `.env` e o `Caddyfile`.
 - **D9. Há uma lista de verificação depois de cada deploy**, porque o `/health` diz pouco ([P9](planos/P9-guia-e-ensaio-geral.md)).
 - **D10. A tag em produção fica versionada no repositório da infra** (`app_tag`). Fazer deploy é mudar essa linha, correr o playbook e commitar só se correu bem.
+  - A tag é a *tag* do Git da versão (`v0.1.0`), construída da `main` do GitHub com `construir.sh --release v0.1.0`.
+  - Os testes (`construir.sh --test`, do `dev` local) têm a etiqueta `dev-<data-hora>`. Entram só no comando do deploy (`-e app_tag=…`) e não ficam no `vars.yml`.
+  - Os dois modos foram decididos pelo dono a 23/10 ([P4](planos/P4-release-no-mac.md)).
 - **D11. Nome local `app.figaro.local`**, num registo estático no router da loja ([P3](planos/P3-nome-local.md)).
   - Só a rede da loja acede à app.
   - Os Macs não acedem: quando for preciso, o dono usa o PC do balcão, por controlo remoto (mais tarde). A exceção é a fase da bancada, em que o Mac mini faz de PC do balcão (Q4).
   - Não há DNS público.
   - Mais tarde, o acesso à app vai ser limitado a IPs escolhidos. Isto fica para discutir e não muda o plano agora.
+- **D12. Ansible em `ansible/`, na raiz do repositório.** O agente tinha proposto `infra/ansible/`. O dono mudou a pasta a 18/10, antes de fazer os seus passos do P1, e passou o plano geral para dentro de `infra/`.
+- **D14. O `app.figaro.local` resolve-se no router, para os dois PCs Windows da loja (balcão e cozinha).** Confirmado pelo dono a 23/10.
+  - O Windows pergunta ao router, e funciona.
+  - Num Mac não abre, porque o macOS usa o Bonjour para os nomes `.local`.
+  - Na bancada, o Mac mini resolve o nome com uma linha no `/etc/hosts` (Q4).
+- **D16. A password do `sudo` do servidor fica no Vault** (`ansible_become_password`). Confirmado pelo dono a 18/10. O `become` usa o `sudo.ws`, porque o `sudo-rs` dá timeout. O Ansible entra como `mciaramella`: o dono pensou num utilizador técnico só para o Ansible e deixou-o para mais tarde (18 e 23/10).
+- **D18. A password do Vault fica no Porta-chaves do Mac mini, sem confirmação.**
+  - O `vault-pass.sh` lê-a com o `security`, que está na lista de acesso da entrada, por isso o Porta-chaves não pergunta nada.
+  - Tem uma cópia no cofre de passwords do dono.
+  - Consequência aceite pelo dono: qualquer programa que corra como ele, incluindo o agente, decifra o Vault sem perguntar.
+  - A 18/10, o dono testou a confirmação obrigatória (uma janela por comando) e voltou atrás, porque aprovar cada comando era incómodo.
 
 ### Propostas pelo agente, por confirmar
 
-- **D12. Ansible em `infra/ansible/`**, ao lado do `router/` e do `server/`.
 - **D13. O Tailscale fica fora desta fase** (decidido pelo dono, 18/10).
   - Vai servir só para acesso de manutenção (SSH e deploy), nunca para a app, e o dono trata disso a seguir.
   - O ensaio previsto: o Mac mini ligado ao 5G do telemóvel do dono, a falar com o servidor pelo Tailscale.
   - Nesta fase, o Ansible liga-se pela rede da loja.
-- **D14. O `.local` funciona nos PCs Windows, que perguntam ao router.** Num Mac não abre, porque o macOS usa o Bonjour para os nomes `.local`. Serve, porque os postos da loja são Windows. Na bancada, o Mac mini resolve o nome com uma linha no `/etc/hosts` (Q4).
 - **D15. A janela de manutenção está desligada no servidor de testes** (`janela_ativa: false`). Liga-se quando o servidor for para a loja.
-- **D16. A password do `sudo` do servidor fica no Vault** (`ansible_become_password`).
 - **D17. Todos os serviços de produção levam `pull_policy: never`.** O servidor nunca descarrega imagens: chegam todas do Mac.
-- **D18. A password do Vault fica no Porta-chaves do Mac mini**, lida por um script pequeno (`vault-pass.sh`), e tem uma cópia no cofre de passwords do dono.
 
 ### Por decidir (dono)
 
-- **Q1. Backups do servidor para a R2.** Com a simulação do Mac mini parada, deixa de haver envios para a pasta `simulacao/`. Até ao dono decidir, o servidor só faz backup local (`RCLONE_REMOTE` vazio).
+- **Q1. Backups do servidor para a R2: resolvida a 23/10, sim.** O servidor envia os backups para a R2, já nesta fase. O dono deixou ao agente a escolha do momento.
+  - **P5:** um token R2 novo para o servidor, com os valores no Vault, e o `rclone.conf` como *template*.
+  - **P6:** confirmar o primeiro envio.
+  - **Pasta:** `teste_loja/` enquanto o servidor estiver na bancada, e `loja/` quando for para a loja. É uma linha no `vars.yml`, `rclone_remote`.
+  - As duas regras de 90 dias do bucket (o bloqueio e o ciclo de vida) têm prefixo vazio, por isso valem também para `teste_loja/`. Os backups de teste apagam-se sozinhos aos 90 dias.
 - **Q2. Drill mensal de restauro: resolvida a 18/10.** Continua no MacBook Pro, com contentores temporários (D2).
 - **Q3. Domínio: resolvida a 18/10.** Não é preciso, porque o nome é local (D11).
 - **Q4. Quem faz as verificações da app na bancada: resolvida a 18/10.**
@@ -112,10 +143,10 @@ O P4 não depende do servidor. O P5 precisa das tags do P4 e do Docker do P2, pa
 
 | Plano | O quê | Executa | Estado |
 |---|---|---|---|
-| [P1](planos/P1-mac-ansible.md), Mac e Ansible | Parar a simulação, Ansible no Mac mini, inventário, Vault | dono e agente | por fazer |
-| [P2](planos/P2-base-servidor.md), base do servidor | `base.yml` v1: Docker, logs, fuso, pastas, e o que já foi feito à mão | agente, com autorização | por fazer |
-| [P3](planos/P3-nome-local.md), nome local | `app.figaro.local` no router | dono e agente | por fazer |
-| [P4](planos/P4-release-no-mac.md), release no Mac | Node fixo, `testar.sh` com Postgres temporário, `release.sh`, imagens de base, `CLAUDE.md` | agente (app e infra) | por fazer |
+| [P1](planos/P1-mac-ansible.md), Mac e Ansible | Parar a simulação, Ansible no Mac mini, inventário, Vault | dono e agente | **feito** (18/10) |
+| [P2](planos/P2-base-servidor.md), base do servidor | `base.yml` v1: Docker, logs, fuso, pastas, e o que já foi feito à mão | agente, com autorização | **feito** (23/10) |
+| [P3](planos/P3-nome-local.md), nome local | `app.figaro.local` no router | dono e agente | em curso (23/10) |
+| [P4](planos/P4-release-no-mac.md), release no Mac | Node fixo, `testar.sh` com Postgres temporário, `construir.sh --test/--release`, imagens de base, `CLAUDE.md` | agente (app e infra) | por fazer |
 | [P5](planos/P5-compose-producao.md), compose de produção | Modelos do compose, `.env` e `Caddyfile`, validados no servidor | agente | por fazer |
 | [P6](planos/P6-primeira-instalacao.md), primeira instalação | `deploy.yml` em modo instalação, HTTPS, raiz do Caddy no Vault | agente e dono | por fazer |
 | [P7](planos/P7-deploy-com-rollback.md), deploy com rollback | Cópia da base de dados, reposição automática, ensaios de falha | agente e dono | por fazer |
@@ -126,8 +157,10 @@ O P4 não depende do servidor. O P5 precisa das tags do P4 e do Docker do P2, pa
 
 - Tailscale, só para acesso de manutenção (D13). O ensaio é o Mac mini no 5G do telemóvel, a falar com o servidor.
 - Proxy de saída e firewall nftables (Fase 2 do plano geral)
-- Envio dos backups do servidor para a R2 (Q1), `restauro.yml` e restauro completo a partir da R2
+- `restauro.yml` e restauro completo a partir da R2. O envio dos backups para a R2 entrou nesta fase (Q1).
 - Firewall do router por porta (Fase 4 do plano geral)
 - O resto da base: chrony só para o router, espelho fixo do apt, MOTD e avisos do Ubuntu Pro, `snapd`, `open-vm-tools` e `smartd`
+- O grupo `lxd` do `mciaramella` e o `lxd-installer`, um atalho para root sem password achado no P2. O dono deixou-o para depois a 23/10.
+- Um utilizador técnico só para o Ansible, em vez do `mciaramella` (D16). Deixado para depois.
 - Postos Windows e o certificado raiz neles
 - Atualizar o resto dos documentos da app que assumem a app a correr no Mac (o `CLAUDE.md` muda no [P4](planos/P4-release-no-mac.md))
