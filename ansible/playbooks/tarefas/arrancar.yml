@@ -1,0 +1,34 @@
+# Arranca a versão que está escrita em /opt/daciaramella e confirma que responde (P6, P7).
+# Falha se a app não ficar healthy em 180 s, ou se o /health pelo Caddy não disser que está tudo bem.
+
+- name: Arrancar (docker compose up), à espera dos healthchecks
+  community.docker.docker_compose_v2:
+    project_src: "{{ pasta_app }}"
+    state: present
+    pull: never
+    wait: true
+    wait_timeout: 180
+
+- name: A app responde por HTTPS, pelo Caddy
+  ansible.builtin.command:
+    argv:
+      - curl
+      - -fsS
+      - --resolve
+      - "{{ app_nome }}:443:127.0.0.1"
+      - --cacert
+      - "{{ pasta_raiz_caddy }}/root.crt"
+      - https://{{ app_nome }}/health
+  register: saude
+  until: saude.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+
+- name: O /health diz que a app e a BD estão bem
+  ansible.builtin.assert:
+    that:
+      - (saude.stdout | from_json).ok
+      - (saude.stdout | from_json).db
+    fail_msg: "O /health respondeu {{ saude.stdout }}"
+    quiet: true

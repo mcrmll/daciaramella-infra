@@ -1,22 +1,7 @@
-# Envia um ficheiro de imagens do Mac para o servidor e carrega-o, se faltar alguma imagem (P6).
+# Envia um ficheiro de imagens do Mac para o servidor e carrega-o, se faltar alguma imagem (P6, P7).
 # Incluído pelo deploy.yml, uma vez por ficheiro. Recebe a variável envio: nome, ficheiro e imagens.
-
-- name: "{{ envio.nome }}: o ficheiro existe no Mac"
-  ansible.builtin.stat:
-    path: "{{ release_dir }}/{{ envio.ficheiro }}"
-    get_checksum: true
-    checksum_algorithm: sha256
-  delegate_to: localhost
-  become: false
-  register: envio_local
-
-- name: "{{ envio.nome }}: o sha256 bate certo com o .sha256 ao lado"
-  ansible.builtin.assert:
-    that:
-      - envio_local.stat.exists
-      - envio_local.stat.checksum == lookup('ansible.builtin.file', release_dir ~ '/' ~ envio.ficheiro ~ '.sha256').split()[0]
-    fail_msg: "Falta {{ envio.ficheiro }} em {{ release_dir }}, ou está diferente do .sha256 (construir.sh ou imagens-base.sh)."
-    quiet: true
+# Se as imagens já estiverem no servidor (por exemplo, para voltar a uma das últimas versões), não
+# precisa do ficheiro no Mac.
 
 - name: "{{ envio.nome }}: as imagens já estão no servidor?"
   ansible.builtin.command:
@@ -29,6 +14,25 @@
 - name: "{{ envio.nome }}: enviar e carregar"
   when: envio_inspect.rc != 0
   block:
+    - name: "{{ envio.nome }}: o ficheiro existe no Mac"
+      ansible.builtin.stat:
+        path: "{{ release_dir }}/{{ envio.ficheiro }}"
+        get_checksum: true
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: envio_local
+
+    - name: "{{ envio.nome }}: o sha256 bate certo com o .sha256 ao lado"
+      ansible.builtin.assert:
+        that:
+          - envio_local.stat.exists
+          - envio_local.stat.checksum == lookup('ansible.builtin.file', release_dir ~ '/' ~ envio.ficheiro ~ '.sha256').split()[0]
+        fail_msg: >-
+          As imagens {{ envio.imagens | join(', ') }} não estão no servidor, e falta {{ envio.ficheiro }}
+          em {{ release_dir }} (ou está diferente do .sha256). Correr primeiro o construir.sh ou o imagens-base.sh.
+        quiet: true
+
     - name: "{{ envio.nome }}: copiar o ficheiro para o servidor"
       ansible.builtin.copy:
         src: "{{ release_dir }}/{{ envio.ficheiro }}"

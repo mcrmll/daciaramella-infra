@@ -1,14 +1,21 @@
-# Deploy da app no servidor.
+# Deploy da app no servidor (P6, P7).
 #
-#   ansible-playbook playbooks/deploy.yml --check --diff     o que faria, sem mudar nada
-#   ansible-playbook playbooks/deploy.yml                    a sério
-#   ansible-playbook playbooks/deploy.yml --tags validar     só a validação dos modelos (P5)
+#   ansible-playbook playbooks/deploy.yml --check --diff       o que faria, sem mudar nada
+#   ansible-playbook playbooks/deploy.yml                      a versão do vars.yml (app_tag, D10)
+#   ansible-playbook playbooks/deploy.yml -e app_tag=dev-…     um teste, que não fica no vars.yml
+#   ansible-playbook playbooks/deploy.yml --tags validar       só a validação dos modelos (P5)
 #
-# Nesta versão (P6) sabe instalar a versão do app_tag e voltar a aplicar a mesma versão. Mudar de versão
-# numa instalação que já existe é um deploy com cópia da BD e rollback: o P7 acrescenta-o.
+# Três casos:
+# - instalação: ainda não há /opt/daciaramella/compose.yml. Instala (P6). Não há nada para onde voltar (D5).
+# - troca: outra versão, ou a mesma versão com outra configuração. Faz uma cópia da BD, troca e, se falhar,
+#   volta sozinho à versão anterior, com a BD e a configuração como estavam (P7, D3, D8).
+# - nada a fazer: a mesma versão, com a mesma configuração.
 #
-# Segredos (P5): as tarefas que escrevem o .env, o rclone.conf e a chave da raiz do Caddy têm no_log e
-# diff: false, para o conteúdo nunca aparecer no ecrã, nem com --diff, nem num erro.
+# Opções (-e): forcar=sim (avança com a versão atual doente), fora_da_janela=sim (com janela_ativa) e
+# agora_ensaio="AAAA-MM-DD HH:MM" (finge outra hora, para ensaiar a janela).
+#
+# Segredos (P5): as tarefas que escrevem ou copiam o .env, o rclone.conf e a chave da raiz do Caddy têm
+# no_log e diff: false, para o conteúdo nunca aparecer no ecrã, nem com --diff, nem num erro.
 
 - name: Deploy da app
   hosts: loja
@@ -25,6 +32,13 @@
       - nome: base
         ficheiro: "{{ imagens_base_ficheiro }}"
         imagens: ["{{ postgres_imagem }}", "{{ caddy_imagem }}"]
+    # psql dentro do contentor do Postgres, ligado à BD "postgres" (para poder copiar e trocar a daciaramella).
+    psql: [docker, compose, exec, -T, postgres, psql, -U, daciaramella, -d, postgres, -v, ON_ERROR_STOP=1, -tAc]
+    # Corta as ligações que ainda houver à daciaramella: o CREATE … TEMPLATE e o RENAME exigem que não haja nenhuma.
+    sql_cortar_ligacoes: >-
+      SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+      WHERE datname = 'daciaramella' AND pid <> pg_backend_pid()
+    carimbo: "{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d-%H%M') }}"
 
   tasks:
     # ━━━ Validar (P5) ━━━
@@ -162,7 +176,7 @@
             state: absent
           when: validar_dir.path is defined
 
-    # ━━━ Que instalação é esta? ━━━
+    # ━━━ Que caso é? ━━━
     - name: Ler o compose.yml instalado (se houver)
       ansible.builtin.slurp:
         src: "{{ pasta_app }}/compose.yml"
@@ -176,12 +190,126 @@
               | regex_findall('image: daciaramella/app:([A-Za-z0-9_.-]+)') | first | default(''))
              if compose_instalado.content is defined else '' }}
 
-    - name: Instalar, ou voltar a aplicar a mesma versão (mudar de versão é o P7)
+    # Em modo de verificação (check_mode: true): só diz se a configuração nova é diferente da instalada.
+    - name: A configuração nova é diferente? (compose.yml e Caddyfile)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../modelos/{{ item }}.j2"
+        dest: "{{ pasta_app }}/{{ item }}"
+      loop: [compose.yml, Caddyfile]
+      check_mode: true
+      diff: false
+      register: cfg_publica
+      when: versao_instalada != ''
+
+    - name: A configuração nova é diferente? (.env)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../modelos/env.j2"
+        dest: "{{ pasta_app }}/.env"
+      check_mode: true
+      diff: false
+      no_log: true
+      register: cfg_env
+      when: versao_instalada != ''
+
+    - name: A configuração nova é diferente? (rclone.conf)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../modelos/rclone.conf.j2"
+        dest: "{{ pasta_app }}/rclone/rclone.conf"
+      check_mode: true
+      diff: false
+      no_log: true
+      register: cfg_rclone
+      when: versao_instalada != ''
+
+    - name: O caso
+      ansible.builtin.set_fact:
+        caso: >-
+          {{ 'instalação' if versao_instalada == ''
+             else 'nada' if (versao_instalada == app_tag
+                             and not (cfg_publica.changed or cfg_env.changed or cfg_rclone.changed))
+             else 'troca' }}
+
+    - name: O que vai acontecer
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Instalação da ' ~ app_tag if caso == 'instalação'
+             else 'Nada a fazer: o servidor já está na ' ~ app_tag ~ ', com a mesma configuração.' if caso == 'nada'
+             else 'Troca: ' ~ versao_instalada ~ ' → ' ~ app_tag
+                  ~ (' (a mesma versão, com outra configuração)' if versao_instalada == app_tag else '') }}
+
+    - name: Nada a fazer, terminar aqui
+      ansible.builtin.meta: end_host
+      when: caso == 'nada'
+
+    # ━━━ Verificações da troca (não mexem em nada) ━━━
+    - name: Janela de manutenção (D15, só com janela_ativa)
+      when: caso == 'troca' and (janela_ativa | bool)
+      block:
+        - name: Dia e hora em Lisboa (ou os do agora_ensaio)
+          ansible.builtin.command:
+            argv: [date, -d, "{{ agora_ensaio | default('now') | replace('T', ' ') }}", "+%u %H%M"]
+          environment:
+            TZ: Europe/Lisbon
+          register: agora_lisboa
+          changed_when: false
+          check_mode: false
+
+        - name: Dia da semana e hora
+          ansible.builtin.set_fact:
+            dia_semana: "{{ agora_lisboa.stdout.split()[0] | int }}"
+            hhmm: "{{ agora_lisboa.stdout.split()[1] | int }}"
+
+        - name: Nunca durante o backup das 04:30
+          ansible.builtin.assert:
+            that: not (415 <= hhmm | int < 445)
+            fail_msg: Entre as 04:15 e as 04:45 corre o backup. O deploy recusa, mesmo com fora_da_janela.
+            quiet: true
+
+        - name: Dentro da janela (01:00–06:00, ou segunda e terça o dia todo)
+          ansible.builtin.assert:
+            that: dia_semana | int in [1, 2] or (100 <= hhmm | int < 600) or (fora_da_janela | default('nao')) == 'sim'
+            fail_msg: Fora da janela de manutenção. Para avançar mesmo assim, -e fora_da_janela=sim.
+            quiet: true
+
+        - name: Em produção, os deploys fazem-se à segunda (D7)
+          ansible.builtin.debug:
+            msg: "Aviso: hoje não é segunda. Em produção, os deploys fazem-se à segunda (D7)."
+          when: dia_semana | int != 1
+
+    - name: Estado da versão atual
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{% raw %}{{ if .State.Health }}{{ .State.Health.Status }}{{ else }}{{ .State.Status }}{{ end }}{% endraw %}"
+          - daciaramella-app-1
+      register: saude_atual
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: caso == 'troca'
+
+    - name: A versão atual está saudável
       ansible.builtin.assert:
-        that: versao_instalada in ['', app_tag]
+        that: saude_atual.stdout == 'healthy' or (forcar | default('nao')) == 'sim'
         fail_msg: >-
-          Está instalada a {{ versao_instalada }} e o app_tag é {{ app_tag }}. Este deploy.yml ainda só sabe
-          instalar: mudar de versão com cópia da BD e rollback é o P7.
+          A versão atual ({{ versao_instalada }}) não está saudável ({{ saude_atual.stdout or saude_atual.stderr }}).
+          Uma troca a partir de uma versão doente só avança com -e forcar=sim.
+        quiet: true
+      when: caso == 'troca'
+
+    - name: Espaço livre para o Docker
+      ansible.builtin.command:
+        argv: [df, -B1, --output=avail, /var/lib/docker]
+      register: espaco
+      changed_when: false
+      check_mode: false
+
+    - name: Pelo menos 5 GB livres
+      ansible.builtin.assert:
+        that: espaco.stdout_lines[-1] | int >= 5000000000
+        fail_msg: "Só há {{ (espaco.stdout_lines[-1] | int / 1e9) | round(1) }} GB livres. O deploy precisa de 5 GB."
         quiet: true
 
     # ━━━ Imagens: do Mac para o servidor ━━━
@@ -217,127 +345,298 @@
         app_commit: "{{ (app_etiquetas.stdout | from_json)['org.opencontainers.image.revision'] | default('?') }}"
       when: not ansible_check_mode
 
-    # ━━━ Configuração em /opt/daciaramella ━━━
-    - name: Pastas do Caddy e do rclone
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "{{ item.mode }}"
-      loop:
-        - { path: "{{ pasta_app }}/caddy/data", mode: "0750" }
-        - { path: "{{ pasta_app }}/rclone", mode: "0700" }
+    # ━━━ Instalação (P6) ━━━
+    - name: Instalação
+      when: caso == 'instalação'
+      block:
+        - name: Escrever o pacote
+          ansible.builtin.include_tasks: tarefas/escrever-pacote.yml
 
-    - name: compose.yml e Caddyfile
+        - name: Arrancar e confirmar
+          ansible.builtin.include_tasks: tarefas/arrancar.yml
+          when: not ansible_check_mode
+
+        - name: Registar no deploys.log
+          ansible.builtin.shell:
+            cmd: echo "$(date '+%Y-%m-%d %H:%M %Z') instalação {{ app_tag }} {{ app_commit | default('?') }}" >> {{ pasta_app }}/deploys.log
+
+    # ━━━ Troca (P7) ━━━
+    - name: "Em --check: o que a troca faria"
+      ansible.builtin.debug:
+        msg: >-
+          Faria o backup normal, guardaria o pacote atual em anterior/, pararia a app e o backup, copiaria a BD
+          para rollback_{{ versao_instalada }}, escreveria o pacote da {{ app_tag }} e arrancaria. Se falhasse,
+          voltaria sozinho para a {{ versao_instalada }}.
+      when: caso == 'troca' and ansible_check_mode
+
+    - name: "Em --check: diferenças no compose.yml e no Caddyfile"
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../modelos/{{ item }}.j2"
         dest: "{{ pasta_app }}/{{ item }}"
-        owner: root
-        group: root
-        mode: "0644"
       loop: [compose.yml, Caddyfile]
+      when: caso == 'troca' and ansible_check_mode
 
-    - name: .env (segredos do Vault)
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../modelos/env.j2"
-        dest: "{{ pasta_app }}/.env"
-        owner: root
-        group: root
-        mode: "0600"
-      no_log: true
-      diff: false
-
-    - name: rclone.conf (segredos do Vault)
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../modelos/rclone.conf.j2"
-        dest: "{{ pasta_app }}/rclone/rclone.conf"
-        owner: root
-        group: root
-        mode: "0600"
-      no_log: true
-      diff: false
-
-    # ━━━ Raiz do Caddy ━━━
-    # Na primeira instalação é o Caddy que a cria; o dono guarda-a no Vault (guardar-raiz-caddy.sh).
-    # Numa reinstalação, repõe-se a do Vault antes de o Caddy arrancar, e os postos continuam a confiar nela.
-    - name: A raiz do Caddy já está no servidor?
-      ansible.builtin.stat:
-        path: "{{ pasta_raiz_caddy }}/root.crt"
-      register: raiz_no_servidor
-
-    - name: Repor a raiz do Caddy guardada no Vault
-      when: vault_caddy_root_crt is defined and not raiz_no_servidor.stat.exists
+    - name: Troca, com cópia da BD
+      when: caso == 'troca' and not ansible_check_mode
+      vars:
+        copia_rollback: "rollback_{{ versao_instalada }}"
+        bd_falhada: "falhado_{{ app_tag }}"
       block:
-        - name: Pasta da raiz
-          ansible.builtin.file:
-            path: "{{ pasta_raiz_caddy }}"
-            state: directory
-            owner: root
-            group: root
-            mode: "0700"
+        # 3. Backup cifrado normal: protege de um desastre (o disco avariar). Se falhar, avisa e continua:
+        # a proteção do deploy é a cópia da BD.
+        - name: Backup cifrado normal, antes de mexer
+          ansible.builtin.command:
+            argv: [docker, compose, exec, -T, backup, /app/backup.sh]
+            chdir: "{{ pasta_app }}"
+          register: backup_antes
+          failed_when: false
 
-        - name: root.crt
+        - name: Resultado do backup
+          ansible.builtin.debug:
+            msg: >-
+              {{ (backup_antes.stdout_lines | last | default(''))
+                 if backup_antes.rc == 0
+                 else 'ATENÇÃO: o backup falhou (rc ' ~ backup_antes.rc ~ '). O deploy continua: a proteção é a cópia da BD.' }}
+
+        # 4. Guardar o pacote atual (D8).
+        - name: Guardar o compose.yml e o Caddyfile atuais em anterior/
           ansible.builtin.copy:
-            content: "{{ vault_caddy_root_crt }}"
-            dest: "{{ pasta_raiz_caddy }}/root.crt"
-            owner: root
-            group: root
+            src: "{{ pasta_app }}/{{ item }}"
+            dest: "{{ pasta_app }}/anterior/{{ item }}"
+            remote_src: true
             mode: "0644"
+          loop: [compose.yml, Caddyfile]
+          diff: false
 
-        - name: root.key
+        - name: Guardar o .env e o rclone.conf atuais em anterior/
           ansible.builtin.copy:
-            content: "{{ vault_caddy_root_key }}"
-            dest: "{{ pasta_raiz_caddy }}/root.key"
-            owner: root
-            group: root
+            src: "{{ pasta_app }}/{{ item.de }}"
+            dest: "{{ pasta_app }}/anterior/{{ item.para }}"
+            remote_src: true
             mode: "0600"
+          loop:
+            - { de: .env, para: .env }
+            - { de: rclone/rclone.conf, para: rclone.conf }
           no_log: true
           diff: false
 
-    # ━━━ Arrancar e confirmar ━━━
-    # Em --check não arranca: as imagens não foram carregadas.
-    - name: Arrancar (docker compose up), à espera dos healthchecks
-      community.docker.docker_compose_v2:
-        project_src: "{{ pasta_app }}"
-        state: present
-        pull: never
-        wait: true
-        wait_timeout: 180
-      register: compose_up
-      when: not ansible_check_mode
+        - name: Guardar a versão atual em anterior/tag
+          ansible.builtin.copy:
+            content: "{{ versao_instalada }}\n"
+            dest: "{{ pasta_app }}/anterior/tag"
+            mode: "0644"
 
-    - name: A app responde por HTTPS, pelo Caddy
-      ansible.builtin.command:
-        argv:
-          - curl
-          - -fsS
-          - --resolve
-          - "{{ app_nome }}:443:127.0.0.1"
-          - --cacert
-          - "{{ pasta_raiz_caddy }}/root.crt"
-          - https://{{ app_nome }}/health
-      register: saude
-      until: saude.rc == 0
-      retries: 12
-      delay: 5
-      changed_when: false
-      when: not ansible_check_mode
+        # 5. Parar a app e o backup: ninguém pode estar ligado à BD durante a cópia.
+        - name: Parar a app e o backup
+          ansible.builtin.command:
+            argv: [docker, compose, stop, app, backup]
+            chdir: "{{ pasta_app }}"
 
-    - name: O /health diz que a app e a BD estão bem
-      ansible.builtin.assert:
-        that:
-          - (saude.stdout | from_json).ok
-          - (saude.stdout | from_json).db
-        fail_msg: "O /health respondeu {{ saude.stdout }}"
-        quiet: true
-      when: not ansible_check_mode
+        # 6. Cópia de rollback. Se falhar, volta a arrancar a versão atual e para, sem trocar nada.
+        - name: Cópia de rollback
+          block:
+            - name: Cópias de deploys anteriores
+              ansible.builtin.command:
+                argv: "{{ psql + [\"SELECT datname FROM pg_database WHERE left(datname, 9) = 'rollback_'\"] }}"
+                chdir: "{{ pasta_app }}"
+              register: rollbacks_antigos
+              changed_when: false
 
-    - name: Registar no deploys.log
-      ansible.builtin.shell:
-        cmd: >-
-          echo "$(date '+%Y-%m-%d %H:%M %Z')
-          {{ 'instalação' if versao_instalada == '' else 'mesma versão' }}
-          {{ app_tag }} {{ app_commit | default('?') }}"
-          >> {{ pasta_app }}/deploys.log
-      when: not ansible_check_mode
+            - name: Apagar as cópias de deploys anteriores
+              ansible.builtin.command:
+                argv: "{{ psql + ['DROP DATABASE \"' ~ item ~ '\"'] }}"
+                chdir: "{{ pasta_app }}"
+              loop: "{{ rollbacks_antigos.stdout_lines }}"
+
+            - name: Cortar ligações que ainda haja à BD
+              ansible.builtin.command:
+                argv: "{{ psql + [sql_cortar_ligacoes] }}"
+                chdir: "{{ pasta_app }}"
+
+            - name: Copiar a BD (CREATE DATABASE … TEMPLATE daciaramella)
+              ansible.builtin.command:
+                argv: "{{ psql + ['CREATE DATABASE \"' ~ copia_rollback ~ '\" TEMPLATE daciaramella'] }}"
+                chdir: "{{ pasta_app }}"
+
+          rescue:
+            - name: A cópia falhou, voltar a arrancar a versão atual
+              ansible.builtin.command:
+                argv: [docker, compose, start, app, backup]
+                chdir: "{{ pasta_app }}"
+
+            - name: Parar sem trocar nada
+              ansible.builtin.fail:
+                msg: >-
+                  A cópia da BD falhou ({{ ansible_failed_result.stderr | default(ansible_failed_result.msg | default('?')) }}).
+                  A {{ versao_instalada }} voltou a arrancar e nada foi trocado.
+
+        # 7 e 8. Trocar e confirmar. Se algo falhar, o rescue volta à versão anterior.
+        - name: Trocar de versão
+          block:
+            - name: Escrever o pacote da versão nova
+              ansible.builtin.include_tasks: tarefas/escrever-pacote.yml
+
+            - name: Arrancar e confirmar
+              ansible.builtin.include_tasks: tarefas/arrancar.yml
+
+            - name: Registar no deploys.log
+              ansible.builtin.shell:
+                cmd: >-
+                  echo "$(date '+%Y-%m-%d %H:%M %Z') troca {{ versao_instalada }} → {{ app_tag }} ok {{ app_commit | default('?') }}"
+                  >> {{ pasta_app }}/deploys.log
+
+          # 9b. Reposição automática.
+          rescue:
+            - name: O que falhou
+              ansible.builtin.set_fact:
+                falha_tarefa: "{{ ansible_failed_task.name | default('?') }}"
+                log_falha: "{{ release_dir }}/logs/deploy-{{ carimbo }}-{{ app_tag }}.log"
+
+            - name: Logs da app que falhou
+              ansible.builtin.command:
+                argv: [docker, compose, logs, --no-color, --tail, "300", app]
+                chdir: "{{ pasta_app }}"
+              register: logs_falha
+              changed_when: false
+              failed_when: false
+
+            - name: Pasta dos logs no Mac
+              ansible.builtin.file:
+                path: "{{ release_dir }}/logs"
+                state: directory
+                mode: "0700"
+              delegate_to: localhost
+              become: false
+
+            - name: Guardar os logs no Mac
+              ansible.builtin.copy:
+                content: "{{ logs_falha.stdout | default('') }}\n{{ logs_falha.stderr | default('') }}\n"
+                dest: "{{ log_falha }}"
+                mode: "0600"
+              delegate_to: localhost
+              become: false
+
+            - name: Repor a versão anterior
+              block:
+                - name: Parar a versão nova
+                  ansible.builtin.command:
+                    argv: [docker, compose, stop, app, backup]
+                    chdir: "{{ pasta_app }}"
+
+                - name: Cortar ligações que ainda haja à BD
+                  ansible.builtin.command:
+                    argv: "{{ psql + [sql_cortar_ligacoes] }}"
+                    chdir: "{{ pasta_app }}"
+
+                - name: Apagar uma falhado_ antiga com o mesmo nome
+                  ansible.builtin.command:
+                    argv: "{{ psql + ['DROP DATABASE IF EXISTS \"' ~ bd_falhada ~ '\"'] }}"
+                    chdir: "{{ pasta_app }}"
+
+                - name: A BD da versão nova passa a falhado_ (fica para se ver o que correu mal)
+                  ansible.builtin.command:
+                    argv: "{{ psql + ['ALTER DATABASE daciaramella RENAME TO \"' ~ bd_falhada ~ '\"'] }}"
+                    chdir: "{{ pasta_app }}"
+
+                - name: A cópia volta a ser a daciaramella
+                  ansible.builtin.command:
+                    argv: "{{ psql + ['ALTER DATABASE \"' ~ copia_rollback ~ '\" RENAME TO daciaramella'] }}"
+                    chdir: "{{ pasta_app }}"
+
+                - name: Repor o compose.yml e o Caddyfile de anterior/
+                  ansible.builtin.copy:
+                    src: "{{ pasta_app }}/anterior/{{ item }}"
+                    dest: "{{ pasta_app }}/{{ item }}"
+                    remote_src: true
+                    mode: "0644"
+                  loop: [compose.yml, Caddyfile]
+                  diff: false
+
+                - name: Repor o .env e o rclone.conf de anterior/
+                  ansible.builtin.copy:
+                    src: "{{ pasta_app }}/anterior/{{ item.de }}"
+                    dest: "{{ pasta_app }}/{{ item.para }}"
+                    remote_src: true
+                    mode: "0600"
+                  loop:
+                    - { de: .env, para: .env }
+                    - { de: rclone.conf, para: rclone/rclone.conf }
+                  no_log: true
+                  diff: false
+
+                - name: Arrancar a versão anterior e confirmar
+                  ansible.builtin.include_tasks: tarefas/arrancar.yml
+
+                - name: Registar no deploys.log
+                  ansible.builtin.shell:
+                    cmd: >-
+                      echo "$(date '+%Y-%m-%d %H:%M %Z') troca {{ versao_instalada }} → {{ app_tag }} FALHOU
+                      ({{ falha_tarefa }}); voltou para {{ versao_instalada }}" >> {{ pasta_app }}/deploys.log
+
+              # Se nem a versão anterior arrancar: parar, mostrar o estado e não tentar mais nada (guia, P9).
+              rescue:
+                - name: Estado dos contentores e das bases de dados
+                  ansible.builtin.shell:
+                    cmd: >-
+                      docker compose ps -a;
+                      docker compose exec -T postgres psql -U daciaramella -d postgres -tAc
+                      "SELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1')"
+                    chdir: "{{ pasta_app }}"
+                  register: estado_final
+                  changed_when: false
+                  failed_when: false
+
+                - name: Mostrar o estado
+                  ansible.builtin.debug:
+                    var: estado_final.stdout_lines
+
+                - name: A reposição também falhou
+                  ansible.builtin.fail:
+                    msg: >-
+                      O deploy de {{ app_tag }} falhou ({{ falha_tarefa }}) e a reposição da {{ versao_instalada }}
+                      também falhou. Não se tentou mais nada. Ver o estado acima e o guia (P9).
+
+            - name: O deploy falhou, mas voltou sozinho
+              ansible.builtin.fail:
+                msg: >-
+                  O deploy de {{ app_tag }} falhou em «{{ falha_tarefa }}» e voltou sozinho para a {{ versao_instalada }},
+                  com a BD e a configuração de antes. A BD da tentativa ficou como {{ bd_falhada }}.
+                  Logs da app: {{ log_falha }}
+
+    # ━━━ 9a. Depois de uma troca que correu bem ━━━
+    - name: Arrumar depois da troca
+      when: caso == 'troca' and not ansible_check_mode
+      block:
+        - name: Etiquetas das imagens da app, da mais recente para a mais antiga
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail;
+              docker image ls daciaramella/app --format '{% raw %}{{ .CreatedAt }}|{{ .Tag }}{% endraw %}'
+              | sort -r | cut -d'|' -f2
+            executable: /bin/bash
+          register: etiquetas_app
+          changed_when: false
+
+        - name: Apagar as imagens da app e do backup além das 3 últimas (nunca a atual nem a anterior)
+          ansible.builtin.command:
+            argv: [docker, image, rm, "daciaramella/app:{{ item }}", "daciaramella/backup:{{ item }}"]
+          loop: "{{ etiquetas_app.stdout_lines[3:] | reject('in', [app_tag, versao_instalada]) | list }}"
+          failed_when: false
+
+        - name: Bases falhado_ que ainda existam
+          ansible.builtin.command:
+            argv: "{{ psql + [\"SELECT datname FROM pg_database WHERE left(datname, 8) = 'falhado_'\"] }}"
+            chdir: "{{ pasta_app }}"
+          register: falhados
+          changed_when: false
+
+        - name: Aviso das bases falhado_
+          ansible.builtin.debug:
+            msg: "Há bases de deploys falhados, a ocupar disco: {{ falhados.stdout_lines | join(', ') }}"
+          when: falhados.stdout_lines | length > 0
+
+        - name: Lembrete
+          ansible.builtin.debug:
+            msg: >-
+              Troca feita: {{ versao_instalada }} → {{ app_tag }}. A cópia rollback_{{ versao_instalada }} fica até ao
+              próximo deploy. Fazer agora a lista de verificação (P9).

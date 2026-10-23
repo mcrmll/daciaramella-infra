@@ -6,7 +6,7 @@ O dono pediu a 18/10 um plano em fases testáveis para instalar a app no servido
 
 Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md). Junta o mínimo da base (Docker, fuso e nome local) ao deploy da Fase 3 do plano geral, para pôr a app a correr cedo. O proxy, a firewall nftables e o restauro a partir da R2 ficam para fases seguintes (ver "Fora desta fase").
 
-**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor. P6 em curso: a v0.1.0 está instalada e verificada pelo dono no Mac mini (23/10); faltam o backup do dia seguinte na R2 e os testes que param a app.**
+**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor. P6 em curso: a v0.1.0 está instalada e verificada pelo dono (23/10); faltam os testes a–d da aceitação. P7 feito a 23/10: troca com cópia da BD e reposição automática, ensaios E1 a E8 passados; o servidor está na v0.1.0.**
 
 O P1, em resumo. Os quatro passos foram feitos a 18/10:
 - passo 1: a simulação parou, com `docker compose down` sem `-v`;
@@ -24,7 +24,7 @@ Aceitação, corrida pelo dono a 18/10:
 ## Como retomar
 
 1. Ler este ficheiro, o [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md) e o plano do próximo P.
-2. Próxima ação: o [P6](planos/P6-primeira-instalacao.md), a primeira instalação.
+2. Próxima ação: os testes a–d da aceitação do [P6](planos/P6-primeira-instalacao.md) (com autorização) e o [P8](planos/P8-alavancas-depois-de-abrir.md).
 3. Regras do dono (as mesmas do repositório da app):
    - o commit é sempre do dono: nunca `git add`, `commit` ou `push`. No fim de um P, deixar a árvore pronta e propor a mensagem;
    - nada corre contra o servidor sem autorização do dono nessa sessão. Primeiro `--check --diff`, depois a sério;
@@ -149,7 +149,7 @@ O P4 não depende do servidor. O P5 precisa das tags do P4 e do Docker do P2, pa
 | [P4](planos/P4-release-no-mac.md), release no Mac | Node fixo, `testar.sh` com Postgres temporário, `construir.sh --test/--release`, imagens de base, `CLAUDE.md` | agente (app e infra) | **feito** (23/10) |
 | [P5](planos/P5-compose-producao.md), compose de produção | Modelos do compose, `.env` e `Caddyfile`, validados no servidor | agente | **feito** (23/10) |
 | [P6](planos/P6-primeira-instalacao.md), primeira instalação | `deploy.yml` em modo instalação, HTTPS, raiz do Caddy no Vault | agente e dono | em curso (23/10) |
-| [P7](planos/P7-deploy-com-rollback.md), deploy com rollback | Cópia da base de dados, reposição automática, ensaios de falha | agente e dono | por fazer |
+| [P7](planos/P7-deploy-com-rollback.md), deploy com rollback | Cópia da base de dados, reposição automática, ensaios de falha | agente e dono | **feito** (23/10) |
 | [P8](planos/P8-alavancas-depois-de-abrir.md), alavancas | Repor a cópia, voltar à imagem anterior, pausar a faturação | agente e dono | por fazer |
 | [P9](planos/P9-guia-e-ensaio-geral.md), guia e ensaio geral | Guia de deploy, lista de verificação, deploy feito só pelo dono | agente e dono | por fazer |
 

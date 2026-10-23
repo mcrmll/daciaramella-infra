@@ -1,0 +1,79 @@
+# Escreve o pacote da versão em /opt/daciaramella (P6, P7): compose.yml, Caddyfile, .env e rclone.conf,
+# e repõe a raiz do Caddy guardada no Vault, se faltar no servidor. Não arranca nada.
+# Uma versão é a imagem e esta configuração, juntas (D8).
+
+- name: Pastas do Caddy e do rclone
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ pasta_app }}/caddy/data", mode: "0750" }
+    - { path: "{{ pasta_app }}/rclone", mode: "0700" }
+
+- name: compose.yml e Caddyfile
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../modelos/{{ item }}.j2"
+    dest: "{{ pasta_app }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [compose.yml, Caddyfile]
+
+- name: .env (segredos do Vault)
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../modelos/env.j2"
+    dest: "{{ pasta_app }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: rclone.conf (segredos do Vault)
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../modelos/rclone.conf.j2"
+    dest: "{{ pasta_app }}/rclone/rclone.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+# Na primeira instalação é o Caddy que cria a raiz; o dono guarda-a no Vault (guardar-raiz-caddy.sh).
+# Numa reinstalação, repõe-se a do Vault antes de o Caddy arrancar, e os postos continuam a confiar nela.
+- name: A raiz do Caddy já está no servidor?
+  ansible.builtin.stat:
+    path: "{{ pasta_raiz_caddy }}/root.crt"
+  register: raiz_no_servidor
+
+- name: Repor a raiz do Caddy guardada no Vault
+  when: vault_caddy_root_crt is defined and not raiz_no_servidor.stat.exists
+  block:
+    - name: Pasta da raiz
+      ansible.builtin.file:
+        path: "{{ pasta_raiz_caddy }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: root.crt
+      ansible.builtin.copy:
+        content: "{{ vault_caddy_root_crt }}"
+        dest: "{{ pasta_raiz_caddy }}/root.crt"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: root.key
+      ansible.builtin.copy:
+        content: "{{ vault_caddy_root_key }}"
+        dest: "{{ pasta_raiz_caddy }}/root.key"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
