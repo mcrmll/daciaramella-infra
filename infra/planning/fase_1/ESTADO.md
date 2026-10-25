@@ -6,7 +6,7 @@ O dono pediu a 18/10 um plano em fases testáveis para instalar a app no servido
 
 Esta fase **não é** a "Fase 1: servidor base" do [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md). Junta o mínimo da base (Docker, fuso e nome local) ao deploy da Fase 3 do plano geral, para pôr a app a correr cedo. O proxy, a firewall nftables e o restauro a partir da R2 ficam para fases seguintes (ver "Fora desta fase").
 
-**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor. P6 feito a 23/10: instalação, reinício, imagens só do Mac, raiz reposta e recomeçar do zero provados. P7 feito a 23/10: troca com cópia da BD e reposição automática, ensaios E1 a E8 passados; o servidor está na v0.1.0. P8 feito a 23/10: repor-copia.yml e faturacao.yml provados (R1 a R4).**
+**Estado: P1 feito a 18/10 (commit `0bea588`, só a pasta `ansible/`). P2 feito a 23/10: Docker, fuso e pastas no servidor pelo `base.yml`, e a segunda corrida deu `changed=0`. P3 feito a 23/10. P4 feito a 23/10: a `v0.1.0` está construída em `~/daciaramella-releases/`. P5 feito a 23/10: os modelos passaram a validação no servidor. P6 feito a 23/10: instalação, reinício, imagens só do Mac, raiz reposta e recomeçar do zero provados. P7 feito a 23/10: troca com cópia da BD e reposição automática, ensaios E1 a E8 passados; o servidor está na v0.1.0. P8 feito a 23/10: repor-copia.yml e faturacao.yml provados (R1 a R4). P9: o guia está escrito (23/10); o ensaio geral e o fecho foram adiados pelo dono a 25/10, para começar a melhoria 3 da app (`docs/enhancements/enh_3/`).**
 
 O P1, em resumo. Os quatro passos foram feitos a 18/10:
 - passo 1: a simulação parou, com `docker compose down` sem `-v`;
@@ -24,7 +24,7 @@ Aceitação, corrida pelo dono a 18/10:
 ## Como retomar
 
 1. Ler este ficheiro, o [plano geral](../../Infra%20da%20pizzaria%20contexto%20e%20plano.md) e o plano do próximo P.
-2. Próxima ação: o dono volta a configurar a app (o teste d do P6 apagou os dados de teste), confirma o R4 de ponta a ponta e faz o ensaio geral do [P9](planos/P9-guia-e-ensaio-geral.md) com o [guia de deploy](../../../docs/operacao/deploy.md).
+2. Próxima ação (adiada pelo dono a 25/10): o dono volta a configurar a app (o teste d do P6 apagou os dados de teste), confirma o R4 de ponta a ponta e faz o ensaio geral do [P9](planos/P9-guia-e-ensaio-geral.md) com o [guia de deploy](../../../docs/operacao/deploy.md). Entretanto, o servidor de testes recebe as versões `dev` da melhoria 3 da app, com `construir.sh --test` e `-e app_tag=…`. O ensaio pode ser a versão da `main` que fechar essa melhoria.
 3. Regras do dono (as mesmas do repositório da app):
    - o commit é sempre do dono: nunca `git add`, `commit` ou `push`. No fim de um P, deixar a árvore pronta e propor a mensagem;
    - nada corre contra o servidor sem autorização do dono nessa sessão. Primeiro `--check --diff`, depois a sério;

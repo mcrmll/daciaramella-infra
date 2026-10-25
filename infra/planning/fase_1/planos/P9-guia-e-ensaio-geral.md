@@ -1,6 +1,6 @@
 # P9 — Guia de deploy, lista de verificação e ensaio geral
 
-Estado: em curso (passo 1 feito a 23/10; falta o ensaio geral do dono) · Depende de: P7, P8 · Bloqueia: — · Executa: agente (guia e fecho) e dono (ensaio) · Máquinas: Mac mini → servidor
+Estado: em curso (passo 1 feito a 23/10; o ensaio geral do dono foi adiado a 25/10, para começar a melhoria 3 da app) · Depende de: P7, P8 · Bloqueia: — · Executa: agente (guia e fecho) e dono (ensaio) · Máquinas: Mac mini → servidor
 
 ## Objetivo
 
