@@ -1,0 +1,81 @@
+# Liga ou desliga a emissão de faturas (P8): a alavanca para um problema na faturação, a qualquer hora.
+#
+#   1. no vars.yml: faturacao_emissao_ativa: 0   (ou 1 para voltar a ligar)
+#   2. ansible-playbook playbooks/faturacao.yml
+#   3. commitar o vars.yml, para o próximo deploy não voltar a ligar a emissão por engano
+#
+# Desligada, as vendas continuam e as faturas ficam em fila; ao voltar a ligar, o worker emite-as.
+# Muda só a linha FATURACAO_EMISSAO_ATIVA do compose.yml instalado e recria só a app (cerca de 10 s sem
+# serviço). Não mexe na versão nem na BD: por isso pode correr fora da janela de manutenção.
+
+- name: Interruptor da emissão de faturas
+  hosts: loja
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - vars/comum.yml
+
+  vars:
+    valor: "{{ faturacao_emissao_ativa | string }}"
+
+  tasks:
+    - name: O valor do vars.yml é 0 ou 1
+      ansible.builtin.assert:
+        that: valor in ['0', '1']
+        fail_msg: O faturacao_emissao_ativa do vars.yml tem de ser 0 ou 1 (está {{ valor }}).
+        quiet: true
+
+    - name: A linha no compose.yml instalado
+      ansible.builtin.replace:
+        path: "{{ pasta_app }}/compose.yml"
+        regexp: '^( +FATURACAO_EMISSAO_ATIVA: )"[01]"$'
+        replace: '\1"{{ valor }}"'
+      register: linha
+
+    - name: Ler o compose.yml
+      ansible.builtin.slurp:
+        src: "{{ pasta_app }}/compose.yml"
+      register: compose_lido
+
+    - name: O compose.yml tem a linha com o valor pedido
+      ansible.builtin.assert:
+        that: >-
+          ('FATURACAO_EMISSAO_ATIVA: "' ~ valor ~ '"') in (compose_lido.content | b64decode)
+        fail_msg: O compose.yml instalado não tem a linha FATURACAO_EMISSAO_ATIVA. Há uma instalação (P6)?
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Recriar a app e confirmar
+      ansible.builtin.include_tasks: tarefas/arrancar.yml
+      when: linha.changed and not ansible_check_mode
+
+    - name: O valor dentro da app
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, app, printenv, FATURACAO_EMISSAO_ATIVA]
+        chdir: "{{ pasta_app }}"
+      register: dentro
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: A app tem o valor pedido
+      ansible.builtin.assert:
+        that: dentro.stdout == valor
+        fail_msg: "A app ficou com FATURACAO_EMISSAO_ATIVA={{ dentro.stdout }}, e não {{ valor }}."
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Registar no deploys.log
+      ansible.builtin.shell:
+        cmd: >-
+          echo "$(date '+%Y-%m-%d %H:%M %Z') faturação: emissão {{ 'ligada' if valor == '1' else 'desligada' }}
+          (FATURACAO_EMISSAO_ATIVA={{ valor }})" >> {{ pasta_app }}/deploys.log
+      when: linha.changed
+
+    - name: Estado
+      ansible.builtin.debug:
+        msg: >-
+          {{ ('Emissão ' ~ ('ligada' if valor == '1' else 'DESLIGADA: as vendas continuam e as faturas ficam em fila.'))
+             if linha.changed
+             else 'Nada a fazer: a emissão já estava ' ~ ('ligada' if valor == '1' else 'desligada') ~ '.' }}
+          Commitar o vars.yml (faturacao_emissao_ativa: {{ valor }}).

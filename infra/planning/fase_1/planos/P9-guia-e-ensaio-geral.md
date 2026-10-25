@@ -1,6 +1,6 @@
 # P9 — Guia de deploy, lista de verificação e ensaio geral
 
-Estado: por fazer · Depende de: P7, P8 · Bloqueia: — · Executa: agente (guia e fecho) e dono (ensaio) · Máquinas: Mac mini → servidor
+Estado: em curso (passo 1 feito a 23/10; falta o ensaio geral do dono) · Depende de: P7, P8 · Bloqueia: — · Executa: agente (guia e fecho) e dono (ensaio) · Máquinas: Mac mini → servidor
 
 ## Objetivo
 
@@ -65,3 +65,19 @@ O dono faz um deploy completo sozinho, só com o guia. É a prova de que a fase 
 ## Riscos
 
 - **O guia desatualiza-se** à medida que os playbooks mudam. Regra: cada alteração a um playbook atualiza o guia no mesmo commit.
+
+## Registo
+
+**23/10, passo 1 (agente): [`docs/operacao/deploy.md`](../../../../docs/operacao/deploy.md).** Escrito para o dono, a operar sozinho.
+- **O que tem:**
+  - antes de começar, e a janela;
+  - o dia a dia (`ops/testar.sh`);
+  - o deploy de uma versão, passo a passo: *tag* no GitHub, `construir.sh --release`, `app_tag`, `--check --diff`, `deploy.yml`, o que se vê quando corre bem e quando volta sozinho, lista e commit;
+  - a lista de verificação;
+  - testar uma versão do `dev` (`--test` e `-e app_tag`);
+  - os quatro casos do `deploy.yml` e as recusas;
+  - "se alguma coisa correr mal", com o `repor-copia.yml`, o `faturacao.yml` e a recuperação à mão;
+  - os comandos de consulta, onde está cada coisa, os playbooks de relance, e quando o servidor for para a loja.
+- **Os comandos de consulta do guia foram corridos no servidor antes de entrarem:** `compose ps`, `deploys.log`, `ultimo-backup.json` e `psql -c "\l"`.
+- **Diferença ao plano:** o motivo de um deploy fora da janela vai para a mensagem do commit, e não para o `deploys.log`. O `deploy.yml` não tem uma opção para o escrever lá.
+- **"Recuperar à mão"** não traz os comandos SQL de troca das bases de dados: diz para parar e pedir ajuda, e aponta o backup cifrado e o `docs/backup-restauro.md` da app. Uma troca de bases à mão, mal feita, apaga dados.

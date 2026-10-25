@@ -1,0 +1,205 @@
+# Repor a cópia da BD do último deploy (P8, D4): volta à versão anterior E aos dados de antes do deploy.
+#
+#   ansible-playbook playbooks/repor-copia.yml
+#
+# Só na noite do próprio deploy, antes de a loja abrir. Depois de abrir, corrige-se para a frente (o deploy da
+# tag anterior, ou o faturacao.yml): repor a cópia apagaria as vendas e as faturas desse dia.
+#
+# Opções (-e): perder_dados=sim (avança mesmo com comandas a mais na BD atual; só no servidor de testes) e
+# confirmar=sim (não pergunta; para os ensaios).
+
+- name: Repor a cópia da BD do último deploy
+  hosts: loja
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - vars/comum.yml
+
+  tasks:
+    # ━━━ O que há para repor ━━━
+    - name: Ler o compose.yml instalado e o anterior/tag
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop: ["{{ pasta_app }}/compose.yml", "{{ pasta_app }}/anterior/tag"]
+      register: lidos
+      failed_when: false
+
+    - name: Versão atual e versão anterior
+      ansible.builtin.set_fact:
+        versao_atual: >-
+          {{ (lidos.results[0].content | b64decode
+              | regex_findall('image: daciaramella/app:([A-Za-z0-9_.-]+)') | first | default(''))
+             if lidos.results[0].content is defined else '' }}
+        versao_anterior: "{{ (lidos.results[1].content | b64decode | trim) if lidos.results[1].content is defined else '' }}"
+
+    - name: Há uma instalação e um pacote anterior
+      ansible.builtin.assert:
+        that: versao_atual != '' and versao_anterior != ''
+        fail_msg: Não há instalação, ou não há pacote em anterior/ (só existe depois de um deploy de troca, P7).
+        quiet: true
+
+    - name: Cópias da BD que existem
+      ansible.builtin.command:
+        argv: "{{ psql + [\"SELECT datname FROM pg_database WHERE left(datname, 9) = 'rollback_'\"] }}"
+        chdir: "{{ pasta_app }}"
+      register: copias
+      changed_when: false
+      check_mode: false
+
+    - name: A cópia do último deploy existe
+      ansible.builtin.assert:
+        that: ('rollback_' ~ versao_anterior) in copias.stdout_lines
+        fail_msg: >-
+          Não há a cópia rollback_{{ versao_anterior }}. Ela só existe depois de um deploy que correu bem, até ao
+          deploy seguinte; depois de um deploy que falhou e voltou sozinho, também já não existe (P7).
+        quiet: true
+
+    - name: Quando foi feita (a hora do anterior/tag)
+      ansible.builtin.stat:
+        path: "{{ pasta_app }}/anterior/tag"
+      register: anterior_tag
+
+    - name: Comandas na BD atual e na cópia
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - postgres
+          - psql
+          - -U
+          - daciaramella
+          - -d
+          - "{{ item }}"
+          - -tAc
+          - select count(*) from comandas
+        chdir: "{{ pasta_app }}"
+      loop: [daciaramella, "rollback_{{ versao_anterior }}"]
+      register: contagens
+      changed_when: false
+      check_mode: false
+
+    - name: O que vai acontecer
+      ansible.builtin.debug:
+        msg:
+          - "Agora: {{ versao_atual }}, com {{ comandas_atual }} comandas."
+          - "Volta para: {{ versao_anterior }}, com a cópia de {{ '%Y-%m-%d %H:%M' | strftime(anterior_tag.stat.mtime) }}, que tem {{ comandas_copia }} comandas."
+          - "A BD atual fica guardada como substituido_{{ versao_atual }}."
+      vars:
+        comandas_atual: "{{ contagens.results[0].stdout | int }}"
+        comandas_copia: "{{ contagens.results[1].stdout | int }}"
+
+    # Comandas a mais = a loja já trabalhou com a versão nova: repor apagaria vendas reais.
+    - name: Sem comandas a mais desde o deploy
+      ansible.builtin.assert:
+        that: contagens.results[0].stdout | int <= contagens.results[1].stdout | int or (perder_dados | default('nao')) == 'sim'
+        fail_msg: >-
+          A BD atual tem {{ contagens.results[0].stdout }} comandas e a cópia tem {{ contagens.results[1].stdout }}:
+          a loja já trabalhou com a {{ versao_atual }}. Repor a cópia apagaria essas vendas. Depois de abrir,
+          corrige-se para a frente (deploy da tag anterior, ou faturacao.yml). Só num servidor de testes:
+          -e perder_dados=sim.
+        quiet: true
+
+    - name: Confirmação
+      ansible.builtin.pause:
+        prompt: "Repor a {{ versao_anterior }} e a cópia da BD? Escreve sim para continuar"
+      register: confirmacao
+      when: (confirmar | default('nao')) != 'sim'
+
+    - name: Confirmado
+      ansible.builtin.assert:
+        that: (confirmar | default('nao')) == 'sim' or (confirmacao.user_input | default('') | trim) == 'sim'
+        fail_msg: Não confirmado. Nada foi mexido.
+        quiet: true
+
+    # ━━━ Repor ━━━
+    - name: Repor a cópia e a versão anterior
+      when: not ansible_check_mode
+      block:
+        - name: Parar a app e o backup
+          ansible.builtin.command:
+            argv: [docker, compose, stop, app, backup]
+            chdir: "{{ pasta_app }}"
+
+        - name: Cortar ligações que ainda haja à BD
+          ansible.builtin.command:
+            argv: "{{ psql + [sql_cortar_ligacoes] }}"
+            chdir: "{{ pasta_app }}"
+
+        - name: Apagar uma substituido_ antiga com o mesmo nome
+          ansible.builtin.command:
+            argv: "{{ psql + ['DROP DATABASE IF EXISTS \"substituido_' ~ versao_atual ~ '\"'] }}"
+            chdir: "{{ pasta_app }}"
+
+        - name: A BD atual passa a substituido_
+          ansible.builtin.command:
+            argv: "{{ psql + ['ALTER DATABASE daciaramella RENAME TO \"substituido_' ~ versao_atual ~ '\"'] }}"
+            chdir: "{{ pasta_app }}"
+
+        - name: A cópia volta a ser a daciaramella
+          ansible.builtin.command:
+            argv: "{{ psql + ['ALTER DATABASE \"rollback_' ~ versao_anterior ~ '\" RENAME TO daciaramella'] }}"
+            chdir: "{{ pasta_app }}"
+
+        - name: Repor o compose.yml e o Caddyfile de anterior/
+          ansible.builtin.copy:
+            src: "{{ pasta_app }}/anterior/{{ item }}"
+            dest: "{{ pasta_app }}/{{ item }}"
+            remote_src: true
+            mode: "0644"
+          loop: [compose.yml, Caddyfile]
+          diff: false
+
+        - name: Repor o .env e o rclone.conf de anterior/
+          ansible.builtin.copy:
+            src: "{{ pasta_app }}/anterior/{{ item.de }}"
+            dest: "{{ pasta_app }}/{{ item.para }}"
+            remote_src: true
+            mode: "0600"
+          loop:
+            - { de: .env, para: .env }
+            - { de: rclone.conf, para: rclone/rclone.conf }
+          no_log: true
+          diff: false
+
+        - name: Arrancar a versão anterior e confirmar
+          ansible.builtin.include_tasks: tarefas/arrancar.yml
+
+        - name: Registar no deploys.log
+          ansible.builtin.shell:
+            cmd: >-
+              echo "$(date '+%Y-%m-%d %H:%M %Z') reposição da cópia {{ versao_atual }} → {{ versao_anterior }}
+              (a BD de antes ficou como substituido_{{ versao_atual }})" >> {{ pasta_app }}/deploys.log
+
+      rescue:
+        - name: Estado dos contentores e das bases de dados
+          ansible.builtin.shell:
+            cmd: >-
+              docker compose ps -a;
+              docker compose exec -T postgres psql -U daciaramella -d postgres -tAc
+              "SELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1')"
+            chdir: "{{ pasta_app }}"
+          register: estado_final
+          changed_when: false
+          failed_when: false
+
+        - name: Mostrar o estado
+          ansible.builtin.debug:
+            var: estado_final.stdout_lines
+
+        - name: A reposição falhou a meio
+          ansible.builtin.fail:
+            msg: A reposição falhou em «{{ ansible_failed_task.name }}». Não se tentou mais nada. Ver o estado acima e o guia (P9).
+
+    - name: Lembretes
+      ansible.builtin.debug:
+        msg:
+          - "Reposta a {{ versao_anterior }}, com os dados de antes do deploy."
+          - >-
+            {{ 'No vars.yml, o app_tag ainda diz ' ~ app_tag ~ ': mudar para ' ~ versao_anterior ~ ' e commitar (D10),
+            senão o próximo deploy volta a pôr a ' ~ app_tag ~ '.' if app_tag != versao_anterior
+            else 'O vars.yml já diz app_tag: ' ~ versao_anterior ~ '.' }}
+          - "A BD da {{ versao_atual }} ficou como substituido_{{ versao_atual }}: apagar quando já não for precisa."
+      when: not ansible_check_mode
