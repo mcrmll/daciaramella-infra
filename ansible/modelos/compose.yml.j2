@@ -4,6 +4,8 @@
 # - Imagens só do Mac: pull_policy: never em todos os serviços (D17).
 # - Só o Caddy publica uma porta (443). O Postgres e a app só se veem na rede interna do compose.
 # - Os segredos vêm do .env, ao lado, e ${VAR:?} faz o compose falhar se faltar algum.
+# - Com etiquetas_ativa (melhoria 7 da app), o serviço etiquetas fala com a impressora Brother QL-800 pela USB do
+#   servidor, e só a app o vê (http://etiquetas:8765). Sem etiquetas_ativa, o compose fica como antes.
 name: daciaramella
 
 services:
@@ -43,6 +45,11 @@ services:
       MOLONI_CLIENT_ID: ${MOLONI_CLIENT_ID:?falta MOLONI_CLIENT_ID no .env}
       MOLONI_CLIENT_SECRET: ${MOLONI_CLIENT_SECRET:?falta MOLONI_CLIENT_SECRET no .env}
       MOLONI_CHAVE_CIFRA: ${MOLONI_CHAVE_CIFRA:?falta MOLONI_CHAVE_CIFRA no .env}
+{% if etiquetas_ativa | bool %}
+      # O programa das etiquetas, na rede interna. A app não depende dele para arrancar: sem ele, só a impressão
+      # das etiquetas falha.
+      ETIQUETAS_URL: http://etiquetas:8765
+{% endif %}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
       interval: 5s
@@ -71,6 +78,23 @@ services:
       - backups:/backups
       - ./rclone:/config/rclone:ro
 
+{% if etiquetas_ativa | bool %}
+  # O programa da impressora de etiquetas (tools/impressao/etiquetas-ql800 da app). Sem portas: só a app lhe chega.
+  etiquetas:
+    image: daciaramella/etiquetas:{{ app_tag }}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      # Tem de bater com o rolo instalado, senão a impressora trava (LED vermelho) até ser desligada e ligada.
+      QL_LABEL: "{{ etiquetas_rolo }}"
+      TZ: Europe/Lisbon
+    # A USB do servidor, também para uma impressora ligada depois do arranque (189 = dispositivos USB).
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - "c 189:* rmw"
+
+{% endif %}
   caddy:
     image: {{ caddy_imagem }}
     pull_policy: never

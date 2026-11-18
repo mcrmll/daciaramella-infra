@@ -15,6 +15,11 @@ faturacao_emissao_ativa: 1 # interruptor da emissão: 0 pausa a faturação (P8)
 faturacao_real_ativa: 0 # faturas reais: sempre 0 no servidor de testes
 moloni_http_ativo: 1
 backup_hora: "04:30"
+# Impressora de etiquetas (melhoria 7 da app): o serviço etiquetas, com a Brother QL-800 na USB do servidor.
+# Para uma versão de antes da melhoria 7 (sem a imagem das etiquetas): -e etiquetas_ativa=false.
+etiquetas_ativa: true
+# O rolo instalado: 62red (preto e vermelho, DK-22251) ou 62 (só preto, DK-22205). Tem de bater com o rolo.
+etiquetas_rolo: 62red
 retencao_local: 30
 # Pasta dos backups na R2 (Q1): teste_loja enquanto o servidor estiver na bancada; loja quando for para a loja.
 rclone_remote: r2:daciaramella-backups/teste_loja

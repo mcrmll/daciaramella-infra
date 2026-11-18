@@ -164,3 +164,14 @@ O P4 não depende do servidor. O P5 precisa das tags do P4 e do Docker do P2, pa
 - Um utilizador técnico só para o Ansible, em vez do `mciaramella` (D16). Deixado para depois.
 - Postos Windows e o certificado raiz neles
 - Atualizar o resto dos documentos da app que assumem a app a correr no Mac (o `CLAUDE.md` muda no [P4](planos/P4-release-no-mac.md))
+
+## Mudanças vindas da app, depois da fase
+
+- **2026-11-18, melhoria 7 da app (etiquetas de validade):** a terceira imagem, `daciaramella/etiquetas` (o programa
+  da impressora Brother QL-800, ligada por USB ao servidor). O `construir.sh` constrói-a quando o commit tem o
+  `tools/impressao/etiquetas-ql800/Dockerfile`. O compose ganha o serviço `etiquetas`, com a USB do servidor e sem
+  portas, e a app ganha o `ETIQUETAS_URL`; tudo só com `etiquetas_ativa`, que por defeito é `true` no `vars.yml`, com
+  o rolo em `etiquetas_rolo`. O deploy conta com a imagem e o serviço novos, recusa logo uma versão sem a imagem (usar
+  `-e etiquetas_ativa=false`) e arranca com `remove_orphans`. O plano é o `docs/enhancements/enh_7/planos/P3-infra.md`
+  do repositório da app.
+

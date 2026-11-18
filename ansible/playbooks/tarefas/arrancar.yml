@@ -6,6 +6,8 @@
     project_src: "{{ pasta_app }}"
     state: present
     pull: never
+    # Tira os serviços que já não estão no compose: voltar a uma versão sem etiquetas não deixa o contentor antigo.
+    remove_orphans: true
     wait: true
     wait_timeout: 180
 

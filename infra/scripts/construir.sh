@@ -1,6 +1,6 @@
 #!/bin/bash
-# Constrói as imagens da app (app e backup) para o servidor (linux/amd64) e guarda-as num ficheiro
-# pronto a enviar (P4 da fase 1). Todo o contacto com a internet do build é do Mac (D1); o servidor
+# Constrói as imagens da app (app, backup e etiquetas) para o servidor (linux/amd64) e guarda-as num
+# ficheiro pronto a enviar (P4 da fase 1; a das etiquetas desde a melhoria 7 da app). Todo o contacto com a internet do build é do Mac (D1); o servidor
 # nunca recebe o código (D2).
 #
 #   construir.sh --test              último commit do ramo dev local → etiqueta dev-AAAA-MM-DD-HHMM
@@ -70,20 +70,31 @@ echo
 echo "━━━ Testes ━━━"
 (cd "$COPIA" && npm ci --no-audit --no-fund --loglevel=error && ops/testar.sh)
 
+# A imagem das etiquetas (o programa da impressora Brother QL-800, melhoria 7 da app) só existe nos commits que têm
+# o Dockerfile dela. Uma versão de antes constrói só a app e o backup, e o deploy dela leva -e etiquetas_ativa=false.
+ALVOS=(app backup)
+if [ -f "$COPIA/tools/impressao/etiquetas-ql800/Dockerfile" ]; then ALVOS+=(etiquetas); fi
+
 echo
-echo "━━━ Imagens (linux/amd64) ━━━"
-for alvo in app backup; do
-  if [ "$alvo" = app ]; then dockerfile="$COPIA/Dockerfile"; else dockerfile="$COPIA/ops/backup/Dockerfile"; fi
+echo "━━━ Imagens (linux/amd64): ${ALVOS[*]} ━━━"
+IMAGENS=()
+for alvo in "${ALVOS[@]}"; do
+  case "$alvo" in
+    app) dockerfile="$COPIA/Dockerfile" ;;
+    backup) dockerfile="$COPIA/ops/backup/Dockerfile" ;;
+    etiquetas) dockerfile="$COPIA/tools/impressao/etiquetas-ql800/Dockerfile" ;;
+  esac
   docker buildx build --platform linux/amd64 --load \
     --label org.opencontainers.image.revision="$COMMIT" \
     --label org.opencontainers.image.version="$TAG" \
     --label org.opencontainers.image.created="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -f "$dockerfile" -t "daciaramella/$alvo:$TAG" "$COPIA"
+  IMAGENS+=("daciaramella/$alvo:$TAG")
 done
 
 echo
 echo "━━━ Ficheiro ━━━"
-docker save --platform linux/amd64 "daciaramella/app:$TAG" "daciaramella/backup:$TAG" \
+docker save --platform linux/amd64 "${IMAGENS[@]}" \
   | zstd -q -T0 -o "$FICHEIRO.parcial"
 mv "$FICHEIRO.parcial" "$FICHEIRO"
 (cd "$RELEASE_DIR" && shasum -a 256 "$(basename "$FICHEIRO")" > "$(basename "$FICHEIRO").sha256")
@@ -92,6 +103,10 @@ DURACAO=$(($(date +%s) - INICIO))
 echo
 echo "Pronto: $FICHEIRO ($(du -h "$FICHEIRO" | cut -f1 | tr -d ' '))"
 echo "  modo $MODO · etiqueta $TAG · commit $COMMIT · $((DURACAO / 60)) min $((DURACAO % 60)) s"
+echo "  imagens: ${ALVOS[*]}"
+if [[ " ${ALVOS[*]} " != *" etiquetas "* ]]; then
+  echo "  ATENÇÃO: esta versão não tem a imagem das etiquetas: no deploy, usar -e etiquetas_ativa=false"
+fi
 if [ "$MODO" = test ]; then
   echo "  deploy de teste: -e app_tag=$TAG (não fica no vars.yml)"
 else

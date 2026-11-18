@@ -71,7 +71,9 @@ infra/scripts/construir.sh --release v0.2.0
 1. Vai buscar a *tag* ao GitHub e recusa se ela não estiver na `main`.
 2. Tira uma cópia limpa, sem tocar na tua pasta da app.
 3. Corre os testes. **Se algum falhar, para, e não constrói nada.**
-4. Constrói as imagens para o servidor (Intel) e deixa-as em `~/daciaramella-releases/daciaramella-v0.2.0.tar.zst`.
+4. Constrói as imagens para o servidor (Intel): a app, o backup e as etiquetas (o programa da impressora de etiquetas,
+   desde a melhoria 7 da app). Deixa-as em `~/daciaramella-releases/daciaramella-v0.2.0.tar.zst`. Uma versão de antes da
+   melhoria 7 não tem a das etiquetas, e o fim do `construir.sh` avisa.
 
 Demora 1 a 2 minutos. No fim mostra:
 
@@ -162,7 +164,9 @@ No PC do balcão. Na bancada, é o Mac mini a fazer de balcão.
 3. No **balcão**, cria uma comanda em modo teste e vê-a aparecer na **cozinha**, em tempo real.
 4. **Imprime o talão.**
 5. Em **Sistema → Moloni**, confirma que a ligação está viva.
-6. No Terminal, na pasta `ansible/`:
+6. Em **Sistema → Impressora**, a parte **Etiquetas** diz «Pronta (rolo 62red)». Com a impressora de etiquetas
+   desligada, diz «sem impressora na USB», e o resto da app funciona na mesma.
+7. No Terminal, na pasta `ansible/`:
 
    ```sh
    ansible loja -b -a 'tail -3 /opt/daciaramella/deploys.log'
@@ -202,6 +206,9 @@ Para ver uma mudança a funcionar antes de a juntar à `main`. Só no servidor d
    ansible-playbook playbooks/deploy.yml
    ```
 
+   Se a versão oficial for de antes da melhoria 7 da app (a `v0.1.0` é), não tem a imagem das etiquetas. Junta
+   `-e etiquetas_ativa=false`, senão o deploy recusa antes de mexer em nada.
+
 Os dois deploys são trocas normais, com a cópia da base de dados e a reposição automática.
 
 ---
@@ -224,6 +231,7 @@ E quando recusa sem mexer em nada:
 | `A versão atual (…) não está saudável` | Ver primeiro porquê (logs, "Comandos de consulta"). Para avançar mesmo assim: `-e forcar=sim`. |
 | `Só há … GB livres` | Libertar espaço no servidor antes do deploy. |
 | `As imagens … não estão no servidor, e falta daciaramella-….tar.zst` | Correr primeiro o `construir.sh` dessa versão. |
+| `Esta versão não tem a imagem das etiquetas` | É de antes da melhoria 7 da app. Para a instalar: `-e etiquetas_ativa=false`. |
 
 ---
 
@@ -238,6 +246,7 @@ E quando recusa sem mexer em nada:
 | **Um problema descoberto depois de a loja abrir** | **Não reponhas a cópia: apagaria as vendas do dia.** Ou corriges e fazes uma versão nova, ou fazes o deploy da versão anterior (`app_tag` anterior no `vars.yml`, e `deploy.yml`). Isso troca só a imagem e mantém os dados. |
 | **Faturas erradas ou a mais** | Pausar a emissão (abaixo) e depois investigar. As vendas continuam e as faturas ficam em fila. |
 | **A app não abre no browser** | `ansible-playbook playbooks/deploy.yml`. Se faltar alguma coisa ou um serviço estiver parado, ele diz `Reparar` e trata disso. |
+| **A etiqueta não sai** (Operação → Etiquetas ou a etiqueta de teste) | Ver em **Sistema → Impressora → Etiquetas** o que diz o estado e carregar em **Verificar**. «sem impressora na USB»: o cabo, a impressora ligada e o LED do Editor Lite apagado. LED vermelho a piscar: o rolo, a tampa, ou o `etiquetas_rolo` do `vars.yml` diferente do rolo instalado; desligar e ligar a impressora. «não responde»: `ansible loja -b -a 'docker compose -f /opt/daciaramella/compose.yml logs --tail 50 etiquetas'`. |
 | **O servidor reiniciou** (por exemplo, um corte de luz) | Tudo volta sozinho em menos de um minuto. Se não voltar, `deploy.yml` (repara). |
 
 ### Repor a cópia (só na noite do deploy)
@@ -304,6 +313,11 @@ ansible loja -b -a 'tail -5 /opt/daciaramella/deploys.log'
 
 # O último backup
 ansible loja -b -a 'docker compose -f /opt/daciaramella/compose.yml exec -T backup cat /backups/ultimo-backup.json'
+
+# O programa das etiquetas: o estado (healthy) e as últimas linhas do log. O que ele vê na USB está em
+# Sistema → Impressora → Etiquetas.
+ansible loja -b -a 'docker compose -f /opt/daciaramella/compose.yml ps etiquetas'
+ansible loja -b -a 'docker compose -f /opt/daciaramella/compose.yml logs --tail 30 etiquetas'
 
 # As bases de dados que existem
 ansible loja -b -a 'docker compose -f /opt/daciaramella/compose.yml exec -T postgres psql -U daciaramella -d postgres -c "\l"'

@@ -31,11 +31,17 @@
     envios:
       - nome: app
         ficheiro: "daciaramella-{{ app_tag }}.tar.zst"
-        imagens: ["daciaramella/app:{{ app_tag }}", "daciaramella/backup:{{ app_tag }}"]
+        # A das etiquetas (impressora Brother QL-800) só com etiquetas_ativa (melhoria 7 da app).
+        imagens: >-
+          {{ ['daciaramella/app:' ~ app_tag, 'daciaramella/backup:' ~ app_tag]
+             + (['daciaramella/etiquetas:' ~ app_tag] if etiquetas_ativa | bool else []) }}
       - nome: base
         ficheiro: "{{ imagens_base_ficheiro }}"
         imagens: ["{{ postgres_imagem }}", "{{ caddy_imagem }}"]
     carimbo: "{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d-%H%M') }}"
+    # Os serviços do compose, por ordem alfabética: o "tudo a correr" compara com esta lista.
+    servicos_esperados: >-
+      {{ (['app', 'backup', 'caddy', 'postgres'] + (['etiquetas'] if etiquetas_ativa | bool else [])) | sort }}
 
   tasks:
     # ━━━ Validar (P5) ━━━
@@ -124,6 +130,19 @@
               - compose.services | dict2items | rejectattr('value.pull_policy', 'defined') | list | length == 0
               - compose.services | dict2items | map(attribute='value.pull_policy') | unique | list == ['never']
               - compose.services | dict2items | selectattr('value.ports', 'defined') | map(attribute='key') | list == ['caddy']
+            quiet: true
+          vars:
+            compose: "{{ compose_ensaio.stdout | from_json }}"
+
+        - name: Etiquetas (melhoria 7 da app), o serviço e o ETIQUETAS_URL da app só com etiquetas_ativa
+          ansible.builtin.assert:
+            that: >-
+              ('etiquetas' in compose.services
+               and compose.services.etiquetas.image == 'daciaramella/etiquetas:' ~ app_tag
+               and (compose.services.app.environment.ETIQUETAS_URL | default('')) == 'http://etiquetas:8765')
+              if etiquetas_ativa | bool
+              else ('etiquetas' not in compose.services and 'ETIQUETAS_URL' not in compose.services.app.environment)
+            fail_msg: O compose.yml não bate certo com o etiquetas_ativa ({{ etiquetas_ativa }}).
             quiet: true
           vars:
             compose: "{{ compose_ensaio.stdout | from_json }}"
@@ -238,11 +257,11 @@
       check_mode: false
       when: versao_instalada != ''
 
-    - name: Tudo a correr? (os 4 serviços, e a app healthy)
+    - name: Tudo a correr? (todos os serviços, e a app healthy)
       ansible.builtin.set_fact:
         tudo_a_correr: >-
           {{ imagens_presentes.rc == 0
-             and (estados | selectattr('State', 'equalto', 'running') | map(attribute='Service') | sort) == ['app', 'backup', 'caddy', 'postgres']
+             and (estados | selectattr('State', 'equalto', 'running') | map(attribute='Service') | sort) == servicos_esperados
              and (estados | selectattr('Service', 'equalto', 'app') | map(attribute='Health') | first | default('')) == 'healthy' }}
       vars:
         estados: "{{ servicos.stdout_lines | default([]) | map('from_json') | list }}"
@@ -349,6 +368,26 @@
       loop_control:
         loop_var: envio
         label: "{{ envio.nome }}"
+
+    # Uma versão de antes da melhoria 7 não traz a imagem das etiquetas: recusar aqui, antes de mexer em nada.
+    - name: As imagens da versão estão todas no servidor, depois de carregadas
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'image', 'inspect'] + (envios | map(attribute='imagens') | flatten) }}"
+      register: imagens_carregadas
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Nenhuma imagem em falta
+      ansible.builtin.assert:
+        that: imagens_carregadas.rc == 0
+        fail_msg: >-
+          {{ ('Esta versão não tem a imagem das etiquetas (daciaramella/etiquetas:' ~ app_tag ~ '), por ser de antes'
+              ~ ' da melhoria 7 da app. Para a instalar, -e etiquetas_ativa=false.')
+             if 'daciaramella/etiquetas' in imagens_carregadas.stderr
+             else 'Falta uma imagem da versão: ' ~ imagens_carregadas.stderr }}
+        quiet: true
+      when: not ansible_check_mode
 
     - name: Etiquetas da imagem da app
       ansible.builtin.command:
@@ -662,9 +701,10 @@
           register: etiquetas_app
           changed_when: false
 
-        - name: Apagar as imagens da app e do backup além das 3 últimas (nunca a atual nem a anterior)
+        # As versões de antes da melhoria 7 não têm a imagem das etiquetas: o docker queixa-se dela e apaga as outras.
+        - name: Apagar as imagens da app, do backup e das etiquetas além das 3 últimas (nunca a atual nem a anterior)
           ansible.builtin.command:
-            argv: [docker, image, rm, "daciaramella/app:{{ item }}", "daciaramella/backup:{{ item }}"]
+            argv: [docker, image, rm, "daciaramella/app:{{ item }}", "daciaramella/backup:{{ item }}", "daciaramella/etiquetas:{{ item }}"]
           loop: "{{ etiquetas_app.stdout_lines[3:] | reject('in', [app_tag, versao_instalada]) | list }}"
           failed_when: false
 
